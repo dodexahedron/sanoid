@@ -18,82 +18,16 @@ namespace Sanoid.Common.Configuration;
 /// </summary>
 public static class Configuration
 {
+    // It is ok to disable this warning here, because we explicitly initialize everything in Initialize, which is when this class
+    // first gets instantiated.
+    // The code is in that method instead of this constructor because it is bad form to do things that can cause exceptions to be
+    // thrown in a static constructor, if it can be reasonably avoided. So long as we make sure we've called Initialize() before
+    // we touch anything else in this class, that is fine.
+#pragma warning disable CS8618
     static Configuration( )
     {
-        Log = LogManager.GetCurrentClassLogger( );
-
-        // Global configuration initialization
-        Log.Debug( "Initializing root-level configuration from Sanoid.Json#/" );
-        SanoidConfigurationCacheDirectory = JsonConfigurationSections.RootConfiguration[ "SanoidConfigurationCacheDirectory" ] ?? "/var/cache/sanoid";
-        SanoidConfigurationDefaultsFile = JsonConfigurationSections.RootConfiguration[ "SanoidConfigurationDefaultsFile" ] ?? "sanoid.defaults.conf";
-        SanoidConfigurationLocalFile = JsonConfigurationSections.RootConfiguration[ "SanoidConfigurationLocalFile" ] ?? "sanoid.conf";
-        SanoidConfigurationPathBase = JsonConfigurationSections.RootConfiguration[ "SanoidConfigurationPathBase" ] ?? "/etc/sanoid";
-        SanoidConfigurationRunDirectory = JsonConfigurationSections.RootConfiguration[ "SanoidConfigurationRunDirectory" ] ?? "/var/run/sanoid";
-        UseSanoidConfiguration = JsonConfigurationSections.RootConfiguration.GetBoolean( "UseSanoidConfiguration" );
-        TakeSnapshots = JsonConfigurationSections.RootConfiguration.GetBoolean( "TakeSnapshots" );
-        PruneSnapshots = JsonConfigurationSections.RootConfiguration.GetBoolean( "PruneSnapshots" );
-        Log.Debug( "Root level configuration initialized." );
-
-        // Template configuration initialization
-        Log.Debug( "Initializing template configuration from Sanoid.json#/Templates" );
-        // First, find the default template
-        IConfigurationSection defaultTemplateSection;
-        IConfigurationSection defaultTemplateSnapshotRetentionSection;
-        IConfigurationSection defaultTemplateSnapshotTimingSection;
-        try
-        {
-            Log.Trace( "Checking for existence of 'default' Template" );
-            defaultTemplateSection = JsonConfigurationSections.TemplatesConfiguration.GetRequiredSection( "default" );
-            Log.Trace( "'default' Template found" );
-        }
-        catch ( InvalidOperationException ex )
-        {
-            // ReSharper disable FormatStringProblem
-            Log.Fatal( "Template 'default' not found in Sanoid.json#/Templates. Program will terminate.", ex );
-            // ReSharper restore FormatStringProblem
-            throw;
-        }
-
-        try
-        {
-            Log.Trace( "Checking for existence of 'SnapshotRetention' section in 'default' Template" );
-            defaultTemplateSnapshotRetentionSection = defaultTemplateSection.GetRequiredSection( "SnapshotRetention" );
-            Log.Trace( "'SnapshotRetention' section found" );
-        }
-        catch ( InvalidOperationException ex )
-        {
-            // ReSharper disable FormatStringProblem
-            Log.Fatal( "Template 'default' does not contain the required SnapshotRetention section. Program will terminate.", ex );
-            // ReSharper restore FormatStringProblem
-            throw;
-        }
-
-        try
-        {
-            Log.Trace( "Checking for existence of 'SnapshotTiming' section in 'default' Template" );
-            defaultTemplateSnapshotTimingSection = defaultTemplateSection.GetRequiredSection( "SnapshotTiming" );
-            Log.Trace( "'SnapshotTiming' section found" );
-        }
-        catch ( InvalidOperationException ex )
-        {
-            // ReSharper disable FormatStringProblem
-            Log.Fatal( "Template 'default' does not contain the required SnapshotTiming section. Program will terminate.", ex );
-            // ReSharper restore FormatStringProblem
-            throw;
-        }
-
-        LoadTemplates( );
-        BuildTemplateHierarchy( );
-        InheritImmutableTemplateSettings( defaultTemplateSnapshotRetentionSection, defaultTemplateSnapshotTimingSection );
-        Log.Debug( "Template configuration complete." );
-
-        Log.Debug( "Initializing Dataset configuration from Sanoid.json" );
-        LoadConfiguredDatasets( );
-        // Diverging from PERL sanoid a bit, here.
-        // We can much more efficiently call zfs list once for everything and just process the strings internally, rather
-        // than invoking multiple zfs list processes.
-        BuildDatasetHierarchy( );
     }
+#pragma warning restore CS8618
 
     /// <summary>
     ///     Gets or sets whether Sanoid.net should take snapshots and prune expired snapshots.
@@ -341,104 +275,71 @@ public static class Configuration
     private static bool _pruneSnapshots;
     private static bool _takeSnapshots;
 
-    private static readonly Logger Log;
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger( );
 
     /// <summary>
-    ///     Builds the full dataset path tree from all zfs datasets compared against configuration.<br />
+    ///     Builds the full dataset path tree and creates datasets as disabled entries.
     /// </summary>
     private static void BuildDatasetHierarchy( )
     {
         Log.Debug( "Building dataset hiearchy from combination of configured datasets and all datasets on system." );
-        List<string> allDatasets = CommandRunner.ZfsListAll( );
+        List<string> zfsListResults = CommandRunner.ZfsListAll( );
         // List is returned in the form of a path tree already, so we can just scan the list linearly
         // Pool nodes will be added as children of the dummy root node, and so on down the chain until all datasets exist in the
         // Datasets diciontary
-        foreach ( string dsName in allDatasets.Skip( 1 ) )
+        foreach ( string dsName in zfsListResults )
         {
-            Log.Trace( "Processing dataset {0}.", dsName );
-            // First, does the dataset already exist in config?
-            // If so, we need to check inheritance
-            if ( Datasets.ContainsKey( dsName ) )
+            Log.Debug( "Processing dataset {0}.", dsName );
+            //TODO: Eliminate this line once finished building the tree
+            string? parentDsName = $"/{Path.GetDirectoryName( dsName )}";
+            Dataset newDs = new( dsName )
             {
-            }
-            else if ( !Datasets.ContainsKey( dsName ) )
-            {
-                string parentDsName = Path.GetDirectoryName( dsName ) ?? string.Empty;
-                if ( string.IsNullOrEmpty( parentDsName ) )
-                {
-                    // This is a pool root, and not in the configuration. Skip it.
-                    Log.Trace( "Dataset {0} is a pool root and is not in the configuration. Skipping.", dsName );
-                    continue;
-                }
-
-                Log.Trace( "Dataset {0} not in configuration. Checking parent {1}.", dsName, parentDsName );
-                if ( Datasets.ContainsKey( parentDsName ) )
-                {
-                    // Parent is in configuration.
-                    // Check if we need to do anything with this one, based on parent.
-                    Dataset parentDs = Datasets[ parentDsName ];
-                    if ( !parentDs.Enabled )
-                    {
-                        Log.Trace( "Parent dataset ({0}) of dataset {1} is marked disabled. Not inheriting settings to {1}.", parentDsName, dsName );
-                    }
-
-                    if ( parentDs.Enabled & !parentDs.Template!.SkipChildren!.Value )
-                    {
-                    }
-                }
-                else
-                {
-                    // This dataset is not in the dictionary
-                    // and
-                    // The parent of this dataset is not in the dictionary.
-                    // First, create a Dataset for the parent, assign it default template, disable it, and stick it in the dictionary
-                    // Then, create a Dataset for this entry, assign it defaults as well, disable it, and link them up via Parent/Children properties
-                    // This specific case shouldn't happen very often except near the root of trees
-                    Log.Trace( "Parent dataset ({0}) of dataset {1} not in configuration. Adding {0} as disabled.", dsName, parentDsName );
-                    Dataset parentDs = new( parentDsName )
-                    {
-                        Enabled = false,
-                        Template = Template.GetDefault( )
-                    };
-                    //TODO: WIP
-                    Dataset thisDs = new( dsName );
-                }
-            }
-        }
-    }
-
-    private static void LoadConfiguredDatasets( )
-    {
-        Log.Debug( "Creating Dataset objects from configuration" );
-        IEnumerable<IConfigurationSection> datasetSections = JsonConfigurationSections.DatasetsConfiguration.GetChildren( );
-
-        // First, create a dummy root dataset with the name '/', which is illegal as a zfs identifier, so it's safe to use.
-        // This will allow us to represent the entire Dataset hierarchy as a tree, even if there are multiple pools.
-
-        foreach ( IConfigurationSection section in datasetSections )
-        {
-            Dataset newDataset = new( section.Key )
-            {
-                Path = section.Key,
-                Enabled = section.GetBoolean( "Enabled", true ),
-                Template = Templates[ section[ "Template" ] ?? "default" ]
+                Enabled = false,
+                IsInConfiguration = false,
+                Parent = Datasets[ parentDsName ]
             };
-            IConfigurationSection overrides = section.GetSection( "TemplateOverrides" );
-            if ( overrides.Exists( ) )
-            {
-                Log.Trace( "Template overrides exist for Dataset {0}. Creating override Template with settings inherited from Template {1}.", section.Key, newDataset.Template.Name );
-                newDataset.Template = newDataset.Template.CloneForDatasetWithOverrides( newDataset, overrides );
-            }
-
-            Datasets.Add( section.Key, newDataset );
+            Datasets.TryAdd( newDs.VirtualPath, newDs );
         }
-
-        Log.Debug( "Configured datasets loaded." );
     }
 
-    private static void GetZfsDatasets( )
+    private static void LoadDatasetConfigurations( )
     {
-        CommandRunner.ZfsListAll( );
+        //TODO: This can probably be inlined when loading datasets
+        Log.Debug( "Setting dataset options from configuration" );
+        // Scan the datasets collection
+        // If an entry exists in configuration, set its settings, following inheritance rules.
+        foreach ( (_, Dataset? ds) in Datasets )
+        {
+            Log.Debug( "Processing dataset {0}", ds.Path );
+            if ( ds.Path == "/" )
+            {
+                //Skip the root dataset, as it is already configured for defaults.
+                continue;
+            }
+            IConfigurationSection section = JsonConfigurationSections.DatasetsConfiguration.GetSection( ds.Path );
+            if ( section.Exists( ) )
+            {
+                // Dataset exists in configuration. Set configured settings and inherit everything else
+                ds.IsInConfiguration = true;
+                ds.Enabled = section.GetBoolean( "Enabled", true );
+                string? templateName = section[ "Template" ];
+                ds.Template = templateName is null ? ds.Parent!.Template : Templates[ templateName ];
+
+                IConfigurationSection overrides = section.GetSection( "TemplateOverrides" );
+                if ( overrides.Exists( ) )
+                {
+                    Log.Debug( "Template overrides exist for Dataset {0}. Creating override Template with settings inherited from Template {1}.", section.Key, templateName );
+                    ds.Template = ds.Template!.CloneForDatasetWithOverrides( ds, overrides );
+                }
+            }
+            else
+            {
+                // Dataset is not explicitly configured. Inherit relevant properties from parent only.
+                ds.Enabled = ds.Parent!.Enabled;
+                ds.Template = ds.Parent.Template;
+            }
+        }
+        Log.Debug( "Dataset options configured." );
     }
 
     private static void LoadTemplates( )
@@ -546,6 +447,75 @@ public static class Configuration
     /// </summary>
     public static void Initialize( )
     {
-        Log.Trace( "Initializing configuration." );
+        // Global configuration initialization
+        Log.Debug( "Initializing root-level configuration from Sanoid.Json#/" );
+        SanoidConfigurationCacheDirectory = JsonConfigurationSections.RootConfiguration[ "SanoidConfigurationCacheDirectory" ] ?? "/var/cache/sanoid";
+        SanoidConfigurationDefaultsFile = JsonConfigurationSections.RootConfiguration[ "SanoidConfigurationDefaultsFile" ] ?? "sanoid.defaults.conf";
+        SanoidConfigurationLocalFile = JsonConfigurationSections.RootConfiguration[ "SanoidConfigurationLocalFile" ] ?? "sanoid.conf";
+        SanoidConfigurationPathBase = JsonConfigurationSections.RootConfiguration[ "SanoidConfigurationPathBase" ] ?? "/etc/sanoid";
+        SanoidConfigurationRunDirectory = JsonConfigurationSections.RootConfiguration[ "SanoidConfigurationRunDirectory" ] ?? "/var/run/sanoid";
+        UseSanoidConfiguration = JsonConfigurationSections.RootConfiguration.GetBoolean( "UseSanoidConfiguration" );
+        TakeSnapshots = JsonConfigurationSections.RootConfiguration.GetBoolean( "TakeSnapshots" );
+        PruneSnapshots = JsonConfigurationSections.RootConfiguration.GetBoolean( "PruneSnapshots" );
+        Log.Debug( "Root level configuration initialized." );
+
+        // Template configuration initialization
+        Log.Debug( "Initializing template configuration from Sanoid.json#/Templates" );
+        // First, find the default template
+        IConfigurationSection defaultTemplateSection;
+        IConfigurationSection defaultTemplateSnapshotRetentionSection;
+        IConfigurationSection defaultTemplateSnapshotTimingSection;
+        try
+        {
+            Log.Trace( "Checking for existence of 'default' Template" );
+            defaultTemplateSection = JsonConfigurationSections.TemplatesConfiguration.GetRequiredSection( "default" );
+            Log.Trace( "'default' Template found" );
+        }
+        catch ( InvalidOperationException ex )
+        {
+            // ReSharper disable FormatStringProblem
+            Log.Fatal( "Template 'default' not found in Sanoid.json#/Templates. Program will terminate.", ex );
+            // ReSharper restore FormatStringProblem
+            throw;
+        }
+
+        try
+        {
+            Log.Trace( "Checking for existence of 'SnapshotRetention' section in 'default' Template" );
+            defaultTemplateSnapshotRetentionSection = defaultTemplateSection.GetRequiredSection( "SnapshotRetention" );
+            Log.Trace( "'SnapshotRetention' section found" );
+        }
+        catch ( InvalidOperationException ex )
+        {
+            // ReSharper disable FormatStringProblem
+            Log.Fatal( "Template 'default' does not contain the required SnapshotRetention section. Program will terminate.", ex );
+            // ReSharper restore FormatStringProblem
+            throw;
+        }
+
+        try
+        {
+            Log.Trace( "Checking for existence of 'SnapshotTiming' section in 'default' Template" );
+            defaultTemplateSnapshotTimingSection = defaultTemplateSection.GetRequiredSection( "SnapshotTiming" );
+            Log.Trace( "'SnapshotTiming' section found" );
+        }
+        catch ( InvalidOperationException ex )
+        {
+            // ReSharper disable FormatStringProblem
+            Log.Fatal( "Template 'default' does not contain the required SnapshotTiming section. Program will terminate.", ex );
+            // ReSharper restore FormatStringProblem
+            throw;
+        }
+
+        LoadTemplates( );
+        BuildTemplateHierarchy( );
+        InheritImmutableTemplateSettings( defaultTemplateSnapshotRetentionSection, defaultTemplateSnapshotTimingSection );
+        Log.Debug( "Template configuration complete." );
+
+        // Diverging from PERL sanoid a bit, here.
+        // We can much more efficiently call zfs list once for everything and just process the strings internally, rather
+        // than invoking multiple zfs list processes.
+        BuildDatasetHierarchy( );
+        LoadDatasetConfigurations( );
     }
 }

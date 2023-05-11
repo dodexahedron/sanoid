@@ -4,7 +4,6 @@
 // from http://www.gnu.org/licenses/gpl-3.0.html on 2014-11-17.  A copy should also be available in this
 // project's Git repository at https://github.com/jimsalterjrs/sanoid/blob/master/LICENSE.
 
-using System.Text;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Configuration;
 using Sanoid.Common.Configuration.Datasets;
@@ -34,11 +33,6 @@ public class Template
 
         Name = templateName;
         UseTemplateName = useTemplateName;
-    }
-
-    private Template( string templateName )
-    {
-        Name = templateName;
     }
 
     private readonly bool? _autoPrune;
@@ -86,19 +80,38 @@ public class Template
     /// <remarks>
     ///     The template MUST be defined in Sanoid.json for initial configuration parsing or an exception will be thrown.
     /// </remarks>
-    public string Name { get; private init; }
+    public string Name { get; }
 
     /// <summary>
-    ///     Gets or sets whether recursive processing will be used for this template and its descendents.
+    ///     Gets or sets whether ZFS native recursive processing will be used for this template and its descendents.
     /// </summary>
     /// <value>
-    ///     A <see langword="bool?" /> indicating whether recursive processing will be used for this template and its
-    ///     descendents.
+    ///     A <see langword="bool?" /> indicating whether ZFS native recursive processing will be used for this template and
+    ///     its descendents.
     /// </value>
+    /// <remarks>
+    ///     Requires <see cref="SkipChildren" /> to be <see langword="false" />.
+    /// </remarks>
+    /// <exception cref="ConfigurationValidationException">
+    ///     If both <see cref="Recursive" /> and <see cref="SkipChildren" /> are <see langword="true" />
+    /// </exception>
     public bool? Recursive
     {
         get => _recursive ?? UseTemplate?.Recursive;
-        init => _recursive = value;
+        init
+        {
+            if ( ( value ?? false ) && ( _skipChildren ?? false ) )
+            {
+                // This behavior is different than PERL sanoid's behavior, which is to treat Recursive as authoritative.
+                // I believe throwing an exception here and forcing the user to configure is properly is better,
+                // as it helps to ensure the user understands the end result of their configuration and doesn't silently
+                // succeed when there is a conflict of settings.
+                Logger.Fatal( "Recursive cannot be true together with SkipChildren=true for template {0}", Name );
+                throw new ConfigurationValidationException( $"Recursive cannot be true together with SkipChildren=true for template {Name}." );
+            }
+
+            _recursive = value;
+        }
     }
 
     /// <summary>
@@ -109,12 +122,25 @@ public class Template
     ///     descendents.
     /// </value>
     /// <remarks>
-    ///     Can be overridden by <see cref="Dataset.TemplateOverrides" />
+    ///     Requires <see cref="Recursive" /> to be <see langword="false" />
     /// </remarks>
     public bool? SkipChildren
     {
         get => _skipChildren ?? UseTemplate?.SkipChildren;
-        init => _skipChildren = value;
+        init
+        {
+            if ( ( _recursive ?? false ) && ( value ?? false ) )
+            {
+                // This behavior is different than PERL sanoid's behavior, which is to treat Recursive as authoritative.
+                // I believe throwing an exception here and forcing the user to configure is properly is better,
+                // as it helps to ensure the user understands the end result of their configuration and doesn't silently
+                // succeed when there is a conflict of settings.
+                Logger.Fatal( "SkipChildren and Recursive both be true for template {0}.", Name );
+                throw new ConfigurationValidationException( $"SkipChildren and Recursive cannot both be true for template {Name}." );
+            }
+
+            _skipChildren = value;
+        }
     }
 
     /// <summary>
@@ -150,8 +176,9 @@ public class Template
         }
     }
 
-    internal string UseTemplateName { get; init; }
+    internal string UseTemplateName { get; private init; }
     private static Template? _defaultTemplate;
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger( );
 
     /// <summary>
     ///     Gets the 'default' template from configuration files or, if it already has been parsed before, returns the existing
@@ -163,20 +190,17 @@ public class Template
     /// </returns>
     public static Template GetDefault( [CallerMemberName] string caller = "unknown caller" )
     {
-        Logger logger = LogManager.GetCurrentClassLogger( );
-        logger.Debug( "Getting default Template for {0}", caller );
+        Logger.Debug( "Getting default Template for {0}", caller );
         IConfigurationSection templateConfig = JsonConfigurationSections.TemplatesConfiguration.GetRequiredSection( "default" );
         if ( _defaultTemplate is not null )
         {
             return _defaultTemplate;
         }
 
-        _defaultTemplate = new Template( "default" )
+        _defaultTemplate = new( "default", "default" )
         {
             SnapshotRetention = Templates.SnapshotRetention.FromConfiguration( templateConfig.GetRequiredSection( "SnapshotRetention" ) ),
-            Name = "default",
             SnapshotTiming = Templates.SnapshotTiming.FromConfiguration( templateConfig.GetRequiredSection( "SnapshotTiming" ) ),
-            UseTemplateName = "default",
             UseTemplate = null,
             AutoPrune = templateConfig.GetBoolean( "AutoPrune" ),
             AutoSnapshot = templateConfig.GetBoolean( "AutoSnapshot" ),
@@ -188,12 +212,13 @@ public class Template
 
     internal Template CloneForDatasetWithOverrides( Dataset targetDataset, IConfigurationSection overrides )
     {
+        Logger.Debug( "Cloning template {0} to apply overrides in dataset {1}", targetDataset.Template!.Name, targetDataset.Path );
         IConfigurationSection retentionOverrides = overrides.GetSection( "SnapshotRetention" );
         IConfigurationSection timingOverrides = overrides.GetSection( "SnapshotTiming" );
-        return new Template( $"{targetDataset.Path}_{Name}_Local" )
+        return new( $"{targetDataset.Path}_{Name}_Local", $"{targetDataset.Path}_{Name}_Local" )
         {
             SnapshotRetention = retentionOverrides.Exists( )
-                ? new SnapshotRetention
+                ? new( )
                 {
                     Daily = retentionOverrides.GetInt( "Daily", SnapshotRetention!.Value.Daily ),
                     Frequent = retentionOverrides.GetInt( "Frequent", SnapshotRetention.Value.Frequent ),
@@ -206,7 +231,7 @@ public class Template
                 }
                 : SnapshotRetention!.Value,
             SnapshotTiming = timingOverrides.Exists( )
-                ? new SnapshotTiming
+                ? new( )
                 {
                     DailyTime = timingOverrides[ "DailyTime" ] is null ? SnapshotTiming!.Value.DailyTime : TimeOnly.Parse( timingOverrides[ "DailyTime" ]! ),
                     HourlyMinute = timingOverrides.GetInt( "HourlyMinute", SnapshotTiming!.Value.HourlyMinute ),
@@ -230,21 +255,20 @@ public class Template
 
     internal void InheritSnapshotRetentionAndTimingSettings( )
     {
-        Logger log = LogManager.GetCurrentClassLogger( );
-        log.Debug( "Inheriting retention and timing settings from Template {0} to children.", Name );
+        Logger.Debug( "Inheriting retention and timing settings from Template {0} to children.", Name );
         foreach ( ( _, Template? value ) in Children )
         {
-            log.Trace( "Getting configuration section for Template {0}", value.Name );
+            Logger.Trace( "Getting configuration section for Template {0}", value.Name );
             IConfigurationSection childConfigSection = JsonConfigurationSections.TemplatesConfiguration.GetSection( value.Name );
             IConfigurationSection childRetentionSettings = childConfigSection.GetSection( "SnapshotRetention" );
             if ( !childRetentionSettings.Exists( ) )
             {
-                log.Trace( "No SnapshotRetention overrides specified for Template {0}. Copying all SnapshotRetention settings from parent {1}", value.Name, Name );
+                Logger.Trace( "No SnapshotRetention overrides specified for Template {0}. Copying all SnapshotRetention settings from parent {1}", value.Name, Name );
                 value.SnapshotRetention = SnapshotRetention!.Value;
             }
             else
             {
-                log.Trace( "SnapshotRetention overrides found for Template {0}. Overriding SnapshotRetention settings from parent {1} as configured.", value.Name, Name );
+                Logger.Trace( "SnapshotRetention overrides found for Template {0}. Overriding SnapshotRetention settings from parent {1} as configured.", value.Name, Name );
                 value.SnapshotRetention = new SnapshotRetention
                 {
                     FrequentPeriod = childRetentionSettings.GetInt( "FrequentPeriod", SnapshotRetention!.Value.FrequentPeriod ),
@@ -261,12 +285,12 @@ public class Template
             IConfigurationSection childTimingSettings = childConfigSection.GetSection( "SnapshotTiming" );
             if ( !childTimingSettings.Exists( ) )
             {
-                log.Trace( "No SnapshotTiming overrides specified for Template {0}. Copying all SnapshotTiming settings from parent {1}", value.Name, Name );
+                Logger.Trace( "No SnapshotTiming overrides specified for Template {0}. Copying all SnapshotTiming settings from parent {1}", value.Name, Name );
                 value.SnapshotTiming = SnapshotTiming!.Value;
             }
             else
             {
-                log.Trace( "SnapshotTiming overrides found for Template {0}. Overriding SnapshotTiming settings from parent {1} as configured.", value.Name, Name );
+                Logger.Trace( "SnapshotTiming overrides found for Template {0}. Overriding SnapshotTiming settings from parent {1} as configured.", value.Name, Name );
                 value.SnapshotTiming = new SnapshotTiming
                 {
                     DailyTime = childTimingSettings[ "DailyTime" ] is null ? SnapshotTiming!.Value.DailyTime : TimeOnly.Parse( childTimingSettings[ "DailyTime" ]! ),
@@ -282,15 +306,15 @@ public class Template
                 };
             }
 
-            log.Trace( "Retention and timing settings loaded for Template {0}.", value.Name );
+            Logger.Trace( "Retention and timing settings loaded for Template {0}.", value.Name );
             if ( Children.Count > 0 )
             {
-                log.Trace( "Processing child templates of {0}.", value.Name );
+                Logger.Trace( "Processing child templates of {0}.", value.Name );
                 value.InheritSnapshotRetentionAndTimingSettings( );
-                log.Trace( "Finished processing child templates of {0}.", value.Name );
+                Logger.Trace( "Finished processing child templates of {0}.", value.Name );
             }
         }
 
-        log.Debug( "Inheritance complete for all children of Template {0}.", Name );
+        Logger.Debug( "Inheritance complete for all children of Template {0}.", Name );
     }
 }

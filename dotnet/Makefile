@@ -66,6 +66,8 @@ build-release:
 	mkdir -p $(RELEASEDIR)
 	dotnet build --configuration $(RELEASECONFIG) -o $(RELEASEDIR) --use-current-runtime --no-self-contained -r linux-x64 Sanoid/Sanoid.csproj
 
+reinstall:	uninstall-release	clean-release	install-release
+
 restore:
 	dotnet restore -f
 
