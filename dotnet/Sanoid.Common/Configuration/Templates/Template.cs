@@ -243,16 +243,17 @@ public class Template
     ///     Set to <see langword="true" /> if being called to create override settings from a <see cref="Dataset" />.<br />
     ///     Otherwise, false
     /// </param>
+    /// <param name="skipRecursion">Mainly intended for calling from tests. Instructs this function to exit without recursing into sub-templates.</param>
     /// <returns></returns>
     /// <exception cref="ArgumentException"></exception>
-    internal Template CreateChild( IConfigurationSection childConfigurationSection, string? nameOverride = null, bool isDatasetOverride = false )
+    public Template CreateChild( IConfigurationSection childConfigurationSection, string? nameOverride = null, bool isDatasetOverride = false, bool skipRecursion = false )
     {
         Logger.Trace( "Entered CreateChild from template {0}, with requested new template {1}", Name, nameOverride ?? ( string.IsNullOrEmpty( childConfigurationSection.Key ) ? "INVALID KEY" : childConfigurationSection.Key ) );
         string childTemplateName = nameOverride ?? childConfigurationSection.Key;
 
         if ( string.IsNullOrWhiteSpace( childTemplateName ) )
         {
-            throw new ArgumentException( "All templates MUST have a non-null, non-whitespace, non-empty name", nameof( childTemplateName ) );
+            throw new ArgumentException( "All templates MUST have a non-null, non-whitespace, non-empty name", nameof( childConfigurationSection ) );
         }
 
         Logger.Debug( "Creating child template {0} of template {1}.", childTemplateName, Name );
@@ -286,7 +287,16 @@ public class Template
             return newChildTemplate;
         }
 
+        if ( skipRecursion )
+        {
+            Logger.Info( "skipRecusion specified while creating template {0}. Returning now.", newChildTemplate.Name );
+            Configuration.Templates.TryAdd( newChildTemplate.Name, newChildTemplate );
+            return newChildTemplate;
+        }
+
         Logger.Debug( "Template {0} has Templates section. Checking contents of that section.", newChildTemplate.Name );
+
+        Configuration.Templates.TryAdd( newChildTemplate.Name, newChildTemplate );
 
         foreach ( IConfigurationSection grandChildTemplateConfiguration in childTemplatesSection.GetChildren( ) )
         {
@@ -297,7 +307,6 @@ public class Template
         Logger.Debug( "No more children of {0} remain. Returning template {0} from {1}.CreateChild", newChildTemplate.Name, Name );
         // Once we've exhausted the grandchild list (or if it was simply empty), return the child.
 
-        Configuration.Templates.TryAdd( newChildTemplate.Name, newChildTemplate );
         return newChildTemplate;
     }
 
