@@ -6,23 +6,26 @@
 
 using System.Reflection;
 using PowerArgs;
-using Sanoid.Common.Configuration.Monitoring;
-using BaseConfiguration = Sanoid.Common.Configuration.Configuration;
-using MonitoringConfiguration = Sanoid.Common.Configuration.Monitoring.Configuration;
 
-namespace Sanoid;
+namespace Sanoid.Common;
 
 /// <summary>
 ///     The command line arguments that sanoid can accept
 /// </summary>
 [ArgExceptionBehavior( ArgExceptionPolicy.StandardExceptionHandling )]
 [UsedImplicitly]
-internal class CommandLineArguments
+public class CommandLineArguments
 {
+    /// <summary>
+    ///     Gets or sets the cache directory to use, overriding the same setting from all other levels
+    /// </summary>
     [ArgDescription( "Cache directory for sanoid" )]
     [ArgShortcut( "--cache-dir" )]
     public string? CacheDir { get; set; }
 
+    /// <summary>
+    ///     Gets or sets the configuration directory to use, overriding the same setting from all other levels
+    /// </summary>
     [ArgDescription( "Base configuration directory for sanoid" )]
     [ArgShortcut( "--configdir" )]
     [ArgShortcut( "--config-dir" )]
@@ -114,16 +117,16 @@ internal class CommandLineArguments
     [ArgEnforceCase]
     public bool Version { get; set; }
 
-    private static readonly Logger Logger = LogManager.GetCurrentClassLogger( );
-
     /// <summary>
-    ///     Called by main thread to override configured settings with any arguments passed at the command line.
+    ///     Called by main thread to set logging settings early, before we load the rest of the configuration.
     /// </summary>
+    [UsedImplicitly]
     public void Main( )
     {
         if ( Version )
         {
-            LogManager.GetLogger( "MessageOnly" ).Info( "Sanoid.net version {0}", Assembly.GetExecutingAssembly( ).GetName( ).Version! );
+            Version version = Assembly.GetExecutingAssembly( ).GetName( ).Version!;
+            LogManager.GetLogger( "MessageOnly" ).Info( "Sanoid.net version {version}", version );
             return;
         }
 
@@ -134,128 +137,27 @@ internal class CommandLineArguments
 
         if ( Quiet )
         {
-            LogManager.Configuration.LoggingRules.ForEach( rule => rule.SetLoggingLevels( LogLevel.Error, LogLevel.Fatal ) );
+            LogManager.Configuration!.LoggingRules.ForEach( rule => rule.SetLoggingLevels( LogLevel.Error, LogLevel.Fatal ) );
         }
 
         if ( Verbose )
         {
-            LogManager.Configuration.LoggingRules.ForEach( rule => rule.SetLoggingLevels( LogLevel.Info, LogLevel.Fatal ) );
+            LogManager.Configuration!.LoggingRules.ForEach( rule => rule.SetLoggingLevels( LogLevel.Info, LogLevel.Fatal ) );
         }
 
         if ( Debug )
         {
-            LogManager.Configuration.LoggingRules.ForEach( rule => rule.SetLoggingLevels( LogLevel.Debug, LogLevel.Fatal ) );
+            LogManager.Configuration!.LoggingRules.ForEach( rule => rule.SetLoggingLevels( LogLevel.Debug, LogLevel.Fatal ) );
         }
 
         if ( Trace )
         {
-            LogManager.Configuration.LoggingRules.ForEach( rule => rule.SetLoggingLevels( LogLevel.Trace, LogLevel.Fatal ) );
+            LogManager.Configuration!.LoggingRules.ForEach( rule => rule.SetLoggingLevels( LogLevel.Trace, LogLevel.Fatal ) );
         }
 
         if ( ReallyQuiet || Quiet || Verbose || Debug || Trace )
         {
             LogManager.ReconfigExistingLoggers( );
-        }
-
-        //Call this so that settings are first retrieved from configuration, to allow arguments to override them.
-        BaseConfiguration.Initialize( );
-
-        if ( Quiet )
-        {
-            BaseConfiguration.DefaultLoggingLevel = LogLevel.Off;
-        }
-
-        if ( ReallyQuiet )
-        {
-            BaseConfiguration.DefaultLoggingLevel = LogLevel.Off;
-        }
-
-        if ( Trace )
-        {
-            BaseConfiguration.DefaultLoggingLevel = LogLevel.Trace;
-        }
-
-        if ( Verbose )
-        {
-            BaseConfiguration.DefaultLoggingLevel = LogLevel.Info;
-        }
-
-        if ( CacheDir is not null )
-        {
-            BaseConfiguration.CacheDirectory = CacheDir;
-        }
-
-        if ( ConfigDir is not null )
-        {
-            BaseConfiguration.ConfigurationPathBase = ConfigDir;
-        }
-
-        if ( Cron )
-        {
-            PruneSnapshots = true;
-            TakeSnapshots = true;
-            //TODO: Implement cron
-        }
-
-        if ( Debug )
-        {
-            BaseConfiguration.DefaultLoggingLevel = LogLevel.Debug;
-        }
-
-        if ( ForcePrune )
-        {
-            PruneSnapshots = true;
-            //TODO: Implement ForcePrune
-        }
-
-        if ( ForceUpdate )
-        {
-            //TODO: Implement ForceUpdate
-        }
-
-        if ( MonitorCapacity )
-        {
-            if ( MonitoringConfiguration.MonitorConfigurations.TryGetValue( "Nagios", out MonitoringConfigurationBase? nagiosConfig ) )
-            {
-                nagiosConfig.MonitorCapacity = true;
-            }
-        }
-
-        if ( MonitorHealth )
-        {
-            if ( MonitoringConfiguration.MonitorConfigurations.TryGetValue( "Nagios", out MonitoringConfigurationBase? nagiosConfig ) )
-            {
-                nagiosConfig.MonitorHealth = true;
-            }
-        }
-
-        if ( MonitorSnapshots )
-        {
-            if ( MonitoringConfiguration.MonitorConfigurations.TryGetValue( "Nagios", out MonitoringConfigurationBase? nagiosConfig ) )
-            {
-                nagiosConfig.MonitorSnapshots = true;
-            }
-        }
-
-        if ( PruneSnapshots )
-        {
-            BaseConfiguration.PruneSnapshots = true;
-        }
-
-        if ( ReadOnly )
-        {
-            Logger.Info( "Performing a dry run. No changes will be made to ZFS." );
-            BaseConfiguration.DryRun = true;
-        }
-
-        if ( RunDir is not null )
-        {
-            BaseConfiguration.RunDirectory = RunDir;
-        }
-
-        if ( TakeSnapshots )
-        {
-            BaseConfiguration.TakeSnapshots = true;
         }
     }
 }
