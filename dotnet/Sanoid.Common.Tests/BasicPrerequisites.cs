@@ -11,55 +11,55 @@ namespace Sanoid.Common.Tests;
 
 [TestFixture( Description = "These tests are for basic system-level prerequisites before we even get into bothering with anything specific to Sanoid.net" )]
 [Order( 1 )]
-[Parallelizable( ParallelScope.Children )]
+[Category( "General" )]
+[Category( "Prerequisites" )]
 public class BasicPrerequisiteTests
 {
     [Test]
-    [Parallelizable( ParallelScope.None )]
     [Order( 1 )]
     public void CheckPathEnvironmentVariableIsDefined( )
     {
+        Console.Write( "Checking PATH environment variable not null: " );
         string? pathVariable = Environment.GetEnvironmentVariable( "PATH" );
+        Console.Write( pathVariable is not null );
         Assert.That( pathVariable, Is.Not.Null );
     }
 
     [Test]
-    [Parallelizable( ParallelScope.None )]
     [Order( 2 )]
     public void CheckPathEnvironmentVariableIsNotEmpty( )
     {
+        Console.Write( "Checking PATH environment variable not empty: " );
         string pathVariable = Environment.GetEnvironmentVariable( "PATH" )!;
+        Console.Write( pathVariable );
         Assert.That( pathVariable, Is.Not.Empty );
     }
 
-    private string _dotnetInfoOutput;
+    private string? _dotnetInfoOutput;
     private readonly Version _minimumSupportedDotnetVersion = new( 7, 0, 0 );
 
     [Test]
-    [Parallelizable( ParallelScope.None )]
+    [NonParallelizable]
     [Order( 3 )]
+    [Category( ".NET" )]
     public void CheckDotnetInfo( )
     {
         // OK, this looks really janky, but that's because there's literally not a way to get the executing runtime
         // version accurately. Even on .net 7.0.105 on linux (what I have on an Ubuntu 22.10 box), the runtime identifies itself as v3.1 (???)
         // So, we're going to slice up the output from `dotnet --info` and look for the .NET SDK section and
         // grab the version string from there to check if it's ok...
+        Console.Write( "Checking dotnet --info..." );
+        Console.Out.Flush();
         ProcessStartInfo psi = new( "dotnet", "--info" )
         {
             CreateNoWindow = true,
             RedirectStandardOutput = true
         };
-        Process process = Process.Start( psi );
-        _dotnetInfoOutput = process.StandardOutput.ReadToEnd( );
-        if ( !process.HasExited )
+        using ( Process? process = Process.Start( psi ) )
         {
-            process.WaitForExit( 2000 );
+            _dotnetInfoOutput = process!.StandardOutput.ReadToEnd( );
+            process?.WaitForExit( 2000 );
         }
-
-        process.Dispose( );
-
-        // Let's go ahead and dump it out just so the user can see...
-        Console.WriteLine( _dotnetInfoOutput );
 
         // First, we'll at least check that it's a real string, before we bother continuing
         // The following test will dissect the string and make appropriate assertions on it
@@ -71,20 +71,19 @@ public class BasicPrerequisiteTests
     }
 
     [Test]
-    [Parallelizable( ParallelScope.Self )]
     [Order( 4 )]
+    [NonParallelizable]
+    [Category( ".NET" )]
     public void CheckDotnetSdkVersionIsSupported( )
     {
-        // This regular expression breaks down as follows:
-        //   Matches but does not capture:
-        //     ".NET SDK:" + (any number of newline characters) + "Version:" + (any amount of whitespace)
-        //   Matches and captures as the named group "versionString":
-        //     (1 instance of 7 or 8)  + "." + (one or more digits) + "." + (one or more digits)
+        Console.Write( "Checking that dotnet SDK version is supported (7.0 or higher): " );
+        Assert.That( _dotnetInfoOutput, Is.Not.Null );
+        // This regular expression grabs the ".NET SDKs installed:" section from dotnet --info
         // We expect it to return a collection of Match objects containing exactly one Match,
         // and that Match is expected to contain the named group "versionString" with a non-null,
         // non-empty string that we can then parse as a Version object for comparison.
-        Regex netSdkSectionRegex = new( @"(?:\.NET SDK:(?:\r|\r\n|\n)*\s*Version:\s+)(?<versionString>[78]{1}\.\d+\.\d+)" );
-        MatchCollection matches = netSdkSectionRegex.Matches( _dotnetInfoOutput );
+        Regex netSdkSectionRegex = new( "(?<header>\\.NET SDKs installed:(\\r\\n|\\r|\\n){1})(?<RuntimeName>(?: +)(?<versionString>[0-9]{1}\\.\\d+\\.\\d+)(?: +\\[.*\\](?:\\r\\n|\\r|\\n){1}))*", RegexOptions.CultureInvariant | RegexOptions.Compiled );
+        MatchCollection matches = netSdkSectionRegex.Matches( _dotnetInfoOutput! );
 
         Assert.Multiple( ( ) =>
         {
@@ -101,26 +100,35 @@ public class BasicPrerequisiteTests
                 Assert.That( matches[ 0 ].Groups[ "versionString" ].Value, Is.Not.Empty );
             } );
 
-            // Now let's validate the string as a version and do the actual version comparison
-            Version sdkVersion = Version.Parse( matches[ 0 ].Groups[ "versionString" ].Value );
-            Assert.That( sdkVersion, Is.InstanceOf<Version>( ) );
-            Assert.That( sdkVersion, Is.GreaterThanOrEqualTo( _minimumSupportedDotnetVersion ) );
+            // If that passed, let's make sure the named group is there and that it's valid
+            GroupCollection matchedGroups = matches[ 0 ].Groups;
+            Assert.That( matchedGroups, Does.ContainKey( "versionString" ) );
+            Group versionGroup = matchedGroups[ "versionString" ];
+            Assert.That( versionGroup.Success, Is.True );
+            // This collection contains ONLY the version number from lines that matched with the name Microsoft.NETCore.App #.#.#
+            CaptureCollection versionGroupCaptures = versionGroup.Captures;
+            // Let's make sure there's something in the collection
+            Assert.That( versionGroupCaptures.Count, Is.GreaterThanOrEqualTo( 1 ) );
+            Version[] netCoreAppVersions = versionGroupCaptures.Select( c => new Version( c.Value ) ).ToArray( );
+            Assert.That( netCoreAppVersions, Is.Not.Null );
+            Assert.That( netCoreAppVersions, Has.Some.GreaterThanOrEqualTo( _minimumSupportedDotnetVersion ) );
         } );
+        Console.Write( "Yes" );
     }
 
     [Test]
-    [Order( 4 )]
+    [Order( 5 )]
+    [NonParallelizable]
+    [Category( ".NET" )]
     public void CheckDotnetRuntimeVersionIsSupported( )
     {
+        Console.Write("Checking that dotnet runtime version is supported (7.0 or higher): "  );
+        Assert.That( _dotnetInfoOutput, Is.Not.Null );
         // This regular expression matches the entire ".NET runtimes installed:" section, and specifically
         // captures named groups that should capture as many lines as there are in the entire section
         // We'll use collection asserts to concisely check for a supported version
-        Regex netRuntimeSectionRegex = new(
-            "(?<header>\\.NET runtimes installed:(\\r\\n|\\r|\\n){1})(?<RuntimeLine>(?: +)(?<RuntimeName>(?<NetCore>Microsoft\\.NETCore\\.App (?<versionString>[0-9]{1}\\.\\d+\\.\\d+))|(Microsoft\\.[A-Za-z.]+ \\d+\\.\\d+\\.\\d+))(?: \\[.*\\]\\r\\n|\\r|\\n){1})*",
-            RegexOptions.CultureInvariant
-            | RegexOptions.Compiled
-        );
-        MatchCollection matches = netRuntimeSectionRegex.Matches( _dotnetInfoOutput );
+        Regex netRuntimeSectionRegex = new( "(?<header>\\.NET runtimes installed:\\p{C}+)(?<RuntimeLine>(?: +)(?<RuntimeName>(?<NetCore>Microsoft\\.NETCore\\.App (?<versionString>[0-9]{1}\\.\\d+\\.\\d+))|(Microsoft\\.[A-Za-z.]+ \\d+\\.\\d+\\.\\d+)) +(?<pathString>\\[[a-zA-Z0-9:_/\\\\\\. -]+\\])(?:\\p{C}+))*", RegexOptions.CultureInvariant | RegexOptions.Compiled );
+        MatchCollection matches = netRuntimeSectionRegex.Matches( _dotnetInfoOutput! );
 
         Assert.Multiple( ( ) =>
         {
@@ -135,10 +143,11 @@ public class BasicPrerequisiteTests
             // This collection contains ONLY the version number from lines that matched with the name Microsoft.NETCore.App #.#.#
             CaptureCollection versionGroupCaptures = versionGroup.Captures;
             // Let's make sure there's something in the collection
-            Assert.That( versionGroupCaptures.Count, Is.GreaterThanOrEqualTo( 1 ) );
+            Assert.That( versionGroupCaptures, Has.Count.GreaterThanOrEqualTo( 1 ) );
             Version[] netCoreAppVersions = versionGroupCaptures.Select( c => new Version( c.Value ) ).ToArray( );
             Assert.That( netCoreAppVersions, Is.Not.Null );
             Assert.That( netCoreAppVersions, Has.Some.GreaterThanOrEqualTo( _minimumSupportedDotnetVersion ) );
         } );
+        Console.Write( "Yes" );
     }
 }
