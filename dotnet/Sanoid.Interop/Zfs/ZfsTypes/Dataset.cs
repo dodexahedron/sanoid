@@ -62,14 +62,90 @@ public class Dataset : ZfsObjectBase
     [JsonIgnore]
     public DateTimeOffset LastYearlySnapshotTimestamp => Properties.TryGetValue( ZfsProperty.DatasetLastYearlySnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
 
-    [JsonIgnore]
-    public bool PruneSnapshots
+    public List<Snapshot> GetSnapshotsToPrune( TemplateSettings template, DateTimeOffset timestamp )
     {
-        get
+        Logger.Debug( "Getting list of snapshots to prune for dataset {0}", Name );
+        List<Snapshot> snapshotsToPrune = new ( );
+
+        if ( FrequentSnapshots.Count > template.SnapshotRetention.Frequent )
         {
-            string valueString = Properties.TryGetValue( ZfsProperty.PruneSnapshotsPropertyName, out ZfsProperty? prop ) ? prop.Value : "false";
-            return bool.TryParse( valueString, out bool result ) && result;
+            int numberToPrune = FrequentSnapshots.Count - template.SnapshotRetention.Frequent;
+            Logger.Debug( "Need to prune oldest {0} frequent snapshots from dataset {1}", numberToPrune, Name );
+            FrequentSnapshots.Sort( );
+            for ( int i = 0; i < numberToPrune; i++ )
+            {
+                Snapshot frequentSnapshot = FrequentSnapshots[ i ];
+                Logger.Debug( "Adding snapshot {0} to prune list", frequentSnapshot.Name );
+                snapshotsToPrune.Add( frequentSnapshot );
+            }
         }
+
+        if ( HourlySnapshots.Count > template.SnapshotRetention.Hourly )
+        {
+            int numberToPrune = HourlySnapshots.Count - template.SnapshotRetention.Hourly;
+            Logger.Debug( "Need to prune oldest {0} hourly snapshots from dataset {1}", numberToPrune, Name );
+            HourlySnapshots.Sort( );
+            for ( int i = 0; i < numberToPrune; i++ )
+            {
+                Snapshot hourlySnapshot = HourlySnapshots[ i ];
+                Logger.Debug( "Adding snapshot {0} to prune list", hourlySnapshot.Name );
+                snapshotsToPrune.Add( hourlySnapshot );
+            }
+        }
+
+        if ( DailySnapshots.Count > template.SnapshotRetention.Daily )
+        {
+            int numberToPrune = DailySnapshots.Count - template.SnapshotRetention.Daily;
+            Logger.Debug( "Need to prune oldest {0} daily snapshots from dataset {1}", numberToPrune, Name );
+            DailySnapshots.Sort( );
+            for ( int i = 0; i < numberToPrune; i++ )
+            {
+                Snapshot dailySnapshot = DailySnapshots[ i ];
+                Logger.Debug( "Adding snapshot {0} to prune list", dailySnapshot.Name );
+                snapshotsToPrune.Add( dailySnapshot );
+            }
+        }
+
+        if ( WeeklySnapshots.Count > template.SnapshotRetention.Weekly )
+        {
+            int numberToPrune = WeeklySnapshots.Count - template.SnapshotRetention.Weekly;
+            Logger.Debug( "Need to prune oldest {0} weekly snapshots from dataset {1}", numberToPrune, Name );
+            WeeklySnapshots.Sort( );
+            for ( int i = 0; i < numberToPrune; i++ )
+            {
+                Snapshot weeklySnapshot = WeeklySnapshots[ i ];
+                Logger.Debug( "Adding snapshot {0} to prune list", weeklySnapshot.Name );
+                snapshotsToPrune.Add( weeklySnapshot );
+            }
+        }
+
+        if ( MonthlySnapshots.Count > template.SnapshotRetention.Monthly )
+        {
+            int numberToPrune = MonthlySnapshots.Count - template.SnapshotRetention.Monthly;
+            Logger.Debug( "Need to prune oldest {0} monthly snapshots from dataset {1}", numberToPrune, Name );
+            MonthlySnapshots.Sort( );
+            for ( int i = 0; i < numberToPrune; i++ )
+            {
+                Snapshot monthlySnapshot = MonthlySnapshots[ i ];
+                Logger.Debug( "Adding snapshot {0} to prune list", monthlySnapshot.Name );
+                snapshotsToPrune.Add( monthlySnapshot );
+            }
+        }
+
+        if ( YearlySnapshots.Count > template.SnapshotRetention.Yearly )
+        {
+            int numberToPrune = YearlySnapshots.Count - template.SnapshotRetention.Yearly;
+            Logger.Debug( "Need to prune oldest {0} yearly snapshots from dataset {1}", numberToPrune, Name );
+            YearlySnapshots.Sort( );
+            for ( int i = 0; i < numberToPrune; i++ )
+            {
+                Snapshot yearlySnapshot = YearlySnapshots[ i ];
+                Logger.Debug( "Adding snapshot {0} to prune list", yearlySnapshot.Name );
+                snapshotsToPrune.Add( yearlySnapshot );
+            }
+        }
+
+        return snapshotsToPrune;
     }
 
     [JsonIgnore]
@@ -82,7 +158,13 @@ public class Dataset : ZfsObjectBase
         }
     }
 
-    public ConcurrentDictionary<string, Snapshot> Snapshots { get; } = new( );
+    public ConcurrentDictionary<string, Snapshot> AllSnapshots { get; } = new( );
+    public List<Snapshot> FrequentSnapshots { get; } = new( );
+    public List<Snapshot> HourlySnapshots { get; } = new( );
+    public List<Snapshot> DailySnapshots { get; } = new( );
+    public List<Snapshot> WeeklySnapshots { get; } = new( );
+    public List<Snapshot> MonthlySnapshots { get; } = new( );
+    public List<Snapshot> YearlySnapshots { get; } = new( );
 
     [JsonIgnore]
     public bool TakeSnapshots
@@ -369,6 +451,29 @@ public class Dataset : ZfsObjectBase
     public void AddSnapshot( Snapshot snap )
     {
         Logger.Trace( "Adding snapshot {0} to dataset object {1}", snap.Name, Name );
-        Snapshots[ snap.Name ] = snap;
+        AllSnapshots[ snap.Name ] = snap;
+        switch ( snap.Period.Kind )
+        {
+            case SnapshotPeriodKind.Frequent:
+                FrequentSnapshots.Add( snap );
+                break;
+            case SnapshotPeriodKind.Hourly:
+                HourlySnapshots.Add(snap );
+                break;
+            case SnapshotPeriodKind.Daily:
+                DailySnapshots.Add( snap );
+                break;
+            case SnapshotPeriodKind.Weekly:
+                WeeklySnapshots.Add( snap );
+                break;
+            case SnapshotPeriodKind.Monthly:
+                MonthlySnapshots.Add( snap );
+                break;
+            case SnapshotPeriodKind.Yearly:
+                YearlySnapshots.Add( snap );
+                break;
+            default:
+                break;
+        }
     }
 }
