@@ -5,7 +5,12 @@
 // project's Git repository at https://github.com/jimsalterjrs/sanoid/blob/master/LICENSE.
 
 using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
+using Sanoid.Interop.Libc;
+using Sanoid.Interop.Libc.Enums;
+using Sanoid.Settings.Settings;
 
 namespace Sanoid.Common;
 
@@ -14,6 +19,8 @@ namespace Sanoid.Common;
 /// </summary>
 public static class BaseClassExtensions
 {
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger( );
+
     /// <summary>
     ///     Attempts to convert the current string to a <see cref="bool" /> value.<br />
     /// </summary>
