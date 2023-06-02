@@ -12,55 +12,35 @@ namespace Sanoid.Interop.Zfs.ZfsTypes;
 
 public class ZfsProperty
 {
-    public ZfsProperty( string propertyNamespace, string propertyName, string propertyValue, string valueSource )
+    public ZfsProperty( string propertyName, string propertyValue, string valueSource )
     {
-        Namespace = propertyNamespace;
         Name = propertyName;
         Value = propertyValue;
         Source = valueSource;
     }
 
-    protected internal ZfsProperty( string name, string value, ZfsPropertySource source )
+    protected internal ZfsProperty( string propertyName, string propertyValue, ZfsPropertySource valueSource )
     {
-        Namespace = "sanoid.net:";
-        Name = name;
-        Value = value;
-        Source = source;
+        Name = propertyName;
+        Value = propertyValue;
+        Source = valueSource;
     }
 
     private ZfsProperty( string[] components )
     {
         Logger.Trace( "Creating new ZfsProperty from array: [{0}]", string.Join( ",", components ) );
-        string[] nameComponents = components[ 0 ].Split( ':', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries );
-        switch ( nameComponents.Length )
-        {
-            case 2:
-            {
-                string namespaceComponent = nameComponents[ 0 ];
-                Logger.Trace( "New property is in namespace {0}", namespaceComponent );
-                Namespace = $"{namespaceComponent}:";
-                Name = nameComponents[ 1 ];
-                break;
-            }
-            default:
-            {
-                Logger.Trace( "New property has no namespace" );
-                Namespace = string.Empty;
-                Name = components[ 0 ];
-                break;
-            }
-        }
-
+        
+        Name = components[ 0 ];
         Value = components[ 1 ];
         Source = components[ 2 ];
 
-        Logger.Trace( "ZfsProperty created: {0}({1})", FullName, Value );
+        Logger.Trace( "ZfsProperty created: {0}({1})", Name, Value );
     }
 
     public static ImmutableDictionary<string, ZfsProperty> DefaultDatasetProperties { get; } = ImmutableDictionary<string, ZfsProperty>.Empty.AddRange( new Dictionary<string, ZfsProperty>
     {
-        { "sanoid.net:template", new( "sanoid.net:template", "default", "local" ) },
-        { "sanoid.net:enabled", new( "sanoid.net:enabled", "false", "local" ) },
+        { TemplatePropertyName, new( TemplatePropertyName, "default", "local" ) },
+        { EnabledPropertyName, new( EnabledPropertyName, "false", "local" ) },
         { DatasetLastDailySnapshotTimestampPropertyName, new( DatasetLastDailySnapshotTimestampPropertyName, DateTimeOffset.UnixEpoch.ToString( "O" ), "local" ) },
         { DatasetLastFrequentSnapshotTimestampPropertyName, new( DatasetLastFrequentSnapshotTimestampPropertyName, DateTimeOffset.UnixEpoch.ToString( "O" ), "local" ) },
         { DatasetLastHourlySnapshotTimestampPropertyName, new( DatasetLastHourlySnapshotTimestampPropertyName, DateTimeOffset.UnixEpoch.ToString( "O" ), "local" ) },
@@ -68,15 +48,13 @@ public class ZfsProperty
         { DatasetLastWeeklySnapshotTimestampPropertyName, new( DatasetLastWeeklySnapshotTimestampPropertyName, DateTimeOffset.UnixEpoch.ToString( "O" ), "local" ) },
         { DatasetLastYearlySnapshotTimestampPropertyName, new( DatasetLastYearlySnapshotTimestampPropertyName, DateTimeOffset.UnixEpoch.ToString( "O" ), "local" ) },
         { PruneSnapshotsPropertyName, new( PruneSnapshotsPropertyName, "false", "local" ) },
-        { "sanoid.net:takesnapshots", new( "sanoid.net:takesnapshots", "false", "local" ) },
-        { "sanoid.net:recursion", new( "sanoid.net:recursion", "default", "local" ) }
+        { TakeSnapshotsPropertyName, new( TakeSnapshotsPropertyName, "false", "local" ) },
+        { RecursionPropertyName, new( RecursionPropertyName, "default", "local" ) }
     } );
-
-    public string FullName => $"{Namespace}{Name}";
 
     public static ImmutableSortedSet<string> KnownDatasetProperties { get; } = ImmutableSortedSet<string>.Empty.Union( new[]
     {
-        "sanoid.net:enabled",
+        EnabledPropertyName,
         DatasetLastDailySnapshotTimestampPropertyName,
         DatasetLastFrequentSnapshotTimestampPropertyName,
         DatasetLastHourlySnapshotTimestampPropertyName,
@@ -84,16 +62,13 @@ public class ZfsProperty
         DatasetLastWeeklySnapshotTimestampPropertyName,
         DatasetLastYearlySnapshotTimestampPropertyName,
         PruneSnapshotsPropertyName,
-        "sanoid.net:recursion",
-        "sanoid.net:takesnapshots",
-        "sanoid.net:template"
+        RecursionPropertyName,
+        TakeSnapshotsPropertyName,
+        TemplatePropertyName
     } );
 
     [JsonIgnore]
     public string Name { get; }
-
-    [JsonIgnore]
-    public string Namespace { get; }
 
     [JsonIgnore]
     public ZfsPropertySource PropertySource
@@ -103,7 +78,7 @@ public class ZfsProperty
     }
 
     [JsonIgnore]
-    public string SetString => $"{FullName}={Value}";
+    public string SetString => $"{Name}={Value}";
 
     public string Source { get; set; }
     public string Value { get; set; }
@@ -114,12 +89,16 @@ public class ZfsProperty
     public const string DatasetLastWeeklySnapshotTimestampPropertyName = "sanoid.net:lastweeklysnapshottimestamp";
     public const string DatasetLastYearlySnapshotTimestampPropertyName = "sanoid.net:lastyearlysnapshottimestamp";
     public const string PruneSnapshotsPropertyName = "sanoid.net:prunesnapshots";
+    public const string TakeSnapshotsPropertyName = "sanoid.net:takesnapshots";
+    public const string RecursionPropertyName = "sanoid.net:recursion";
+    public const string TemplatePropertyName = "sanoid.net:template";
+    public const string EnabledPropertyName = "sanoid.net:enabled";
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger( );
 
     /// <inheritdoc />
     public override string ToString( )
     {
-        return $"{FullName}: {Value}";
+        return $"{Name}: {Value}";
     }
 
     public static bool TryParse( string value, out ZfsProperty? property )

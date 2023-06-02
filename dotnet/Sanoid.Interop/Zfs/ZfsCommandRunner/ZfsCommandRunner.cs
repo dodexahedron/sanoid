@@ -35,7 +35,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
     /// <inheritdoc />
     public override bool TakeSnapshot( Dataset ds, SnapshotPeriod period, DateTimeOffset timestamp, SanoidSettings settings, out Snapshot snapshot )
     {
-        Logger.Debug( "Snapshot requested for dataset {0}", ds.Name );
+        Logger.Debug( "{0:G} snapshot requested for dataset {1}", period.Kind, ds.Name );
         snapshot = Snapshot.GetSnapshotForCommandRunner( ds, period, timestamp, settings );
         try
         {
@@ -62,7 +62,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
         if ( settings.DryRun )
         {
             Logger.Info( "DRY RUN: Would execute `{0} {1}`", ZfsPath, zfsSnapshotStartInfo.Arguments );
-            return true;
+            return false;
         }
 
         Logger.Debug( "Calling `{0} {1}`", ZfsPath, arguments );
@@ -122,7 +122,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
                 Logger.Trace( "{0}", outputLine );
                 if ( ZfsProperty.TryParse( outputLine, out ZfsProperty? property ) )
                 {
-                    properties.Add( property!.FullName, property );
+                    properties.Add( property!.Name, property );
                 }
             }
 
@@ -454,7 +454,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
             if ( dryRun )
             {
                 Logger.Info( "DRY RUN: Would execute `{0} {1}`", zfsPath, zfsSetStartInfo.Arguments );
-                return true;
+                return false;
             }
 
             Logger.Debug( "Calling {0} {1}", (object)zfsSetStartInfo.FileName, (object)zfsSetStartInfo.Arguments );

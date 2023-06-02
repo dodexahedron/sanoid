@@ -18,7 +18,7 @@ internal static class ZfsTasks
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger( );
 
     /// <exception cref="InvalidOperationException">If an invalid value is returned when getting the mutex</exception>
-    internal static Errno TakeAllConfiguredSnapshots( IZfsCommandRunner commandRunner, SanoidSettings settings, SnapshotPeriod period, DateTimeOffset timestamp, ref Dictionary<string, Dataset> datasets )
+    internal static Errno TakeAllConfiguredSnapshots( IZfsCommandRunner commandRunner, SanoidSettings settings, DateTimeOffset timestamp, ref Dictionary<string, Dataset> datasets )
     {
         const string snapshotMutexName = "Global\\Sanoid.net_Snapshots";
         using MutexAcquisitionResult mutexAcquisitionResult = Mutexes.GetAndWaitMutex( snapshotMutexName );
@@ -60,64 +60,49 @@ internal static class ZfsTasks
             // The MaxBy function will fail if the sort key is a value type (it is - DateTimeOffset) and the collection is null
             // ReSharper disable SimplifyLinqExpressionUseMinByAndMaxBy
             List<ZfsProperty> propsToSet = new( );
-            if ( ds is { TakeSnapshots: true, Enabled: true } )
+            if ( ds is not { TakeSnapshots: true } )
             {
-                if ( ds.IsFrequentSnapshotNeeded( template, timestamp ) )
-                {
-                    bool frequentSnapshotTaken = TakeSnapshot( commandRunner, settings, ds, SnapshotPeriod.Frequent, timestamp, out Snapshot? snapshot );
-                    if ( frequentSnapshotTaken && ds.Properties.TryGetValue( ZfsProperty.DatasetLastFrequentSnapshotTimestampPropertyName, out ZfsProperty? prop ) )
-                    {
-                        Logger.Trace( "Frequent snapshot {0} taken successfully", snapshot?.Name ?? $"of {ds.Name}" );
-
-                        prop.Value = timestamp.ToString( "O" );
-                        prop.PropertySource = ZfsPropertySource.Local;
-                        ds[ ZfsProperty.DatasetLastFrequentSnapshotTimestampPropertyName ] = prop;
-                        propsToSet.Add( prop );
-                    }
-                }
-
-                if ( ds.IsHourlySnapshotNeeded( template.SnapshotRetention, timestamp ) )
-                {
-                    bool hourlySnapshotTaken = TakeSnapshot( commandRunner, settings, ds, SnapshotPeriod.Hourly, timestamp, out Snapshot? snapshot );
-                    if ( hourlySnapshotTaken && ds.Properties.TryGetValue( ZfsProperty.DatasetLastHourlySnapshotTimestampPropertyName, out ZfsProperty? prop ) )
-                    {
-                        Logger.Trace( "Hourly snapshot {0} taken successfully", snapshot?.Name ?? $"of {ds.Name}" );
-
-                        prop.Value = timestamp.ToString( "O" );
-                        prop.PropertySource = ZfsPropertySource.Local;
-                        ds[ ZfsProperty.DatasetLastHourlySnapshotTimestampPropertyName ] = prop;
-                        propsToSet.Add( prop );
-                    }
-                }
-
-                if ( ds.IsDailySnapshotNeeded( template.SnapshotRetention, timestamp ) )
-                {
-                    bool dailySnapshotTaken = TakeSnapshot( commandRunner, settings, ds, SnapshotPeriod.Daily, timestamp, out Snapshot? snapshot );
-                    if ( dailySnapshotTaken && ds.Properties.TryGetValue( ZfsProperty.DatasetLastDailySnapshotTimestampPropertyName, out ZfsProperty? prop ) )
-                    {
-                        Logger.Trace( "Daily snapshot {0} taken successfully", snapshot?.Name ?? $"of {ds.Name}" );
-                        prop.Value = timestamp.ToString( "O" );
-                        prop.PropertySource = ZfsPropertySource.Local;
-                        ds[ ZfsProperty.DatasetLastDailySnapshotTimestampPropertyName ] = prop;
-                        propsToSet.Add( prop );
-                    }
-                }
-
-                if ( ds.IsWeeklySnapshotNeeded( template, timestamp ) )
-                {
-                    bool weeklySnapshotTaken = TakeSnapshot( commandRunner, settings, ds, SnapshotPeriod.Weekly, timestamp, out Snapshot? snapshot );
-                    if ( weeklySnapshotTaken && ds.Properties.TryGetValue( ZfsProperty.DatasetLastWeeklySnapshotTimestampPropertyName, out ZfsProperty? prop ) )
-                    {
-                        Logger.Trace( "Weekly snapshot {0} taken successfully", snapshot?.Name ?? $"of {ds.Name}" );
-                        prop.Value = timestamp.ToString( "O" );
-                        prop.PropertySource = ZfsPropertySource.Local;
-                        ds[ ZfsProperty.DatasetLastWeeklySnapshotTimestampPropertyName ] = prop;
-                        propsToSet.Add( prop );
-                    }
-                }
-
-                commandRunner.SetZfsProperties( settings.DryRun, ds.Name, propsToSet.ToArray( ) );
+                Logger.Debug( "Dataset {0} not configured to take snapshots - skipping", ds.Name );
+                continue;
             }
+
+            if ( ds is not { Enabled: true } )
+            {
+                Logger.Debug( "Dataset {0} is disabled - skipping", ds.Name );
+                continue;
+            }
+
+            if ( ds.IsFrequentSnapshotNeeded( template, timestamp ) )
+            {
+                TakeSnapshotKind( ds, SnapshotPeriod.Frequent, propsToSet );
+            }
+
+            if ( ds.IsHourlySnapshotNeeded( template.SnapshotRetention, timestamp ) )
+            {
+                TakeSnapshotKind( ds, SnapshotPeriod.Hourly, propsToSet );
+            }
+
+            if ( ds.IsDailySnapshotNeeded( template.SnapshotRetention, timestamp ) )
+            {
+                TakeSnapshotKind( ds, SnapshotPeriod.Daily, propsToSet );
+            }
+
+            if ( ds.IsWeeklySnapshotNeeded( template, timestamp ) )
+            {
+                TakeSnapshotKind( ds, SnapshotPeriod.Weekly, propsToSet );
+            }
+
+            if ( ds.IsMonthlySnapshotNeeded( template, timestamp ) )
+            {
+                TakeSnapshotKind( ds, SnapshotPeriod.Monthly, propsToSet );
+            }
+
+            if ( ds.IsYearlySnapshotNeeded( template.SnapshotRetention, timestamp ) )
+            {
+                TakeSnapshotKind( ds, SnapshotPeriod.Yearly, propsToSet );
+            }
+
+            commandRunner.SetZfsProperties( settings.DryRun, ds.Name, propsToSet.ToArray( ) );
         }
 
         Logger.Debug( "Finished taking snapshots" );
@@ -127,6 +112,36 @@ internal static class ZfsTasks
         Mutexes.ReleaseMutex( snapshotMutexName );
 
         return Errno.EOK;
+
+        void TakeSnapshotKind( Dataset ds, SnapshotPeriod period, List<ZfsProperty> propsToSet )
+        {
+            ZfsProperty? prop = null;
+            string datasetSnapshotTimestampPropertyName = period.Kind switch
+            {
+                SnapshotPeriodKind.Frequent => ZfsProperty.DatasetLastFrequentSnapshotTimestampPropertyName,
+                SnapshotPeriodKind.Hourly => ZfsProperty.DatasetLastHourlySnapshotTimestampPropertyName,
+                SnapshotPeriodKind.Daily => ZfsProperty.DatasetLastDailySnapshotTimestampPropertyName,
+                SnapshotPeriodKind.Weekly => ZfsProperty.DatasetLastWeeklySnapshotTimestampPropertyName,
+                SnapshotPeriodKind.Monthly => ZfsProperty.DatasetLastMonthlySnapshotTimestampPropertyName,
+                SnapshotPeriodKind.Yearly => ZfsProperty.DatasetLastYearlySnapshotTimestampPropertyName,
+                _ => throw new ArgumentOutOfRangeException( )
+            };
+            bool snapshotTaken = TakeSnapshot( commandRunner, settings, ds, period, timestamp, out Snapshot? snapshot );
+            if ( snapshotTaken && ds.Properties.TryGetValue( datasetSnapshotTimestampPropertyName, out prop ) )
+            {
+                Logger.Trace( "{0} snapshot {1} taken successfully", period, snapshot?.Name ?? $"of {ds.Name}" );
+                prop.Value = timestamp.ToString( "O" );
+                prop.PropertySource = ZfsPropertySource.Local;
+                ds[ datasetSnapshotTimestampPropertyName ] = prop;
+                propsToSet.Add( prop );
+            }
+            else if ( !snapshotTaken && settings.DryRun )
+            {
+                ZfsProperty fakeProp = prop ?? new ZfsProperty( datasetSnapshotTimestampPropertyName, timestamp.ToString( "O" ), ZfsPropertySource.Local );
+                ds[ datasetSnapshotTimestampPropertyName ] = fakeProp;
+                propsToSet.Add( fakeProp );
+            }
+        }
     }
 
     internal static bool TakeSnapshot( IZfsCommandRunner commandRunner, SanoidSettings settings, Dataset ds, SnapshotPeriod snapshotPeriod, DateTimeOffset timestamp, out Snapshot? snapshot )
@@ -145,7 +160,7 @@ internal static class ZfsTasks
             return false;
         }
 
-        if ( ds.Recursion == SnapshotRecursionMode.Zfs && ds[ "sanoid.net:recursion" ]?.PropertySource != ZfsPropertySource.Local )
+        if ( ds.Recursion == SnapshotRecursionMode.Zfs && ds[ ZfsProperty.RecursionPropertyName ]?.PropertySource != ZfsPropertySource.Local )
         {
             Logger.Trace( "Ancestor of dataset {0} is configured for zfs native recursion and recursion not set locally. Skipping", ds.Name );
             return false;
@@ -220,6 +235,12 @@ internal static class ZfsTasks
             return true;
         }
 
+        if ( settings.DryRun )
+        {
+            Logger.Info( "DRY RUN: Snapshot for dataset {0} not taken", ds.Name );
+            return false;
+        }
+
         Logger.Error( "Snapshot for dataset {0} not taken", ds.Name );
         return false;
     }
@@ -238,14 +259,21 @@ internal static class ZfsTasks
 
             // Attempt to set the missing properties for the pool.
             // Log an error if unsuccessful
-            if ( !zfsCommandRunner.SetZfsProperties( dryRun, poolName, propertyArray ) )
+            if ( zfsCommandRunner.SetZfsProperties( dryRun, poolName, propertyArray ) )
             {
-                errorsEncountered = true;
-                Logger.Error( "Failed updating properties for pool {0}. Unset properties: {1}", poolName, JsonSerializer.Serialize( propertyArray ) );
+                Logger.Info( "Finished updating properties for pool {0}", poolName );
             }
             else
             {
-                Logger.Info( "Finished updating properties for pool {0}", poolName );
+                if ( dryRun )
+                {
+                    Logger.Info( "DRY RUN: Properties intentionally not set for {0}: {1}", poolName, JsonSerializer.Serialize( propertyArray ) );
+                }
+                else
+                {
+                    errorsEncountered = true;
+                    Logger.Error( "Failed updating properties for pool {0}. Unset properties: {1}", poolName, JsonSerializer.Serialize( propertyArray ) );
+                }
             }
         }
 
