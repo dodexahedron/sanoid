@@ -121,13 +121,13 @@ public class Dataset : ZfsObjectBase
         }
 
         Logger.Debug( "Checking prune deferral setting for dataset {0}", Name );
-        if ( PruneDeferral != 0 && PoolUsedCapacity < PruneDeferral )
+        if ( RetentionSettings.PruneDeferral != 0 && PoolUsedCapacity < RetentionSettings.PruneDeferral )
         {
-            Logger.Info( "Pool used capacity for {0} ({1}%) is below prune deferral threshold of {2}%. Skipping pruning of {0}", Name, PoolUsedCapacity, PruneDeferral );
+            Logger.Info( "Pool used capacity for {0} ({1}%) is below prune deferral threshold of {2}%. Skipping pruning of {0}", Name, PoolUsedCapacity, RetentionSettings.PruneDeferral );
             return new( );
         }
 
-        if ( PruneDeferral == 0 )
+        if ( RetentionSettings.PruneDeferral == 0 )
         {
             Logger.Debug( "Prune deferral not enabled for {0}", Name );
         }
@@ -136,9 +136,9 @@ public class Dataset : ZfsObjectBase
         List<Snapshot> snapshotsSetForPruning = FrequentSnapshots.Where( s => s.PruneSnapshots ).ToList( );
         Logger.Debug( "Frequent snapshots of {0} available for pruning: {1}", Name, string.Join( ',', snapshotsSetForPruning.Select( s => s.Name ) ) );
         int numberToPrune;
-        if ( int.TryParse( Properties[ ZfsProperty.SnapshotRetentionFrequentPropertyName ].Value, out int numberToKeep ) && snapshotsSetForPruning.Count > numberToKeep )
+        if ( snapshotsSetForPruning.Count > RetentionSettings.Frequent )
         {
-            numberToPrune = snapshotsSetForPruning.Count - numberToKeep;
+            numberToPrune = snapshotsSetForPruning.Count - RetentionSettings.Frequent;
             Logger.Debug( "Need to prune oldest {0} frequent snapshots from dataset {1}", numberToPrune, Name );
             snapshotsSetForPruning.Sort( );
             for ( int i = 0; i < numberToPrune; i++ )
@@ -152,9 +152,9 @@ public class Dataset : ZfsObjectBase
         snapshotsSetForPruning.Clear( );
         snapshotsSetForPruning = HourlySnapshots.Where( s => s.PruneSnapshots ).ToList( );
         Logger.Debug( "Hourly snapshots of {0} available for pruning: {1}", Name, string.Join( ',', snapshotsSetForPruning.Select( s => s.Name ) ) );
-        if ( int.TryParse( Properties[ ZfsProperty.SnapshotRetentionHourlyPropertyName ].Value, out numberToKeep ) && snapshotsSetForPruning.Count > numberToKeep )
+        if ( snapshotsSetForPruning.Count > RetentionSettings.Hourly )
         {
-            numberToPrune = snapshotsSetForPruning.Count - numberToKeep;
+            numberToPrune = snapshotsSetForPruning.Count - RetentionSettings.Hourly;
             Logger.Debug( "Need to prune oldest {0} hourly snapshots from dataset {1}", numberToPrune, Name );
             snapshotsSetForPruning.Sort( );
             for ( int i = 0; i < numberToPrune; i++ )
@@ -168,9 +168,9 @@ public class Dataset : ZfsObjectBase
         snapshotsSetForPruning.Clear( );
         snapshotsSetForPruning = DailySnapshots.Where( s => s.PruneSnapshots ).ToList( );
         Logger.Debug( "Daily snapshots of {0} available for pruning: {1}", Name, string.Join( ',', snapshotsSetForPruning.Select( s => s.Name ) ) );
-        if ( int.TryParse( Properties[ ZfsProperty.SnapshotRetentionDailyPropertyName ].Value, out numberToKeep ) && snapshotsSetForPruning.Count > numberToKeep )
+        if ( snapshotsSetForPruning.Count > RetentionSettings.Daily )
         {
-            numberToPrune = snapshotsSetForPruning.Count - numberToKeep;
+            numberToPrune = snapshotsSetForPruning.Count - RetentionSettings.Daily;
             Logger.Debug( "Need to prune oldest {0} daily snapshots from dataset {1}", numberToPrune, Name );
             snapshotsSetForPruning.Sort( );
             for ( int i = 0; i < numberToPrune; i++ )
@@ -184,9 +184,9 @@ public class Dataset : ZfsObjectBase
         snapshotsSetForPruning.Clear( );
         snapshotsSetForPruning = WeeklySnapshots.Where( s => s.PruneSnapshots ).ToList( );
         Logger.Debug( "Weekly snapshots of {0} available for pruning: {1}", Name, string.Join( ',', snapshotsSetForPruning.Select( s => s.Name ) ) );
-        if ( int.TryParse( Properties[ ZfsProperty.SnapshotRetentionWeeklyPropertyName ].Value, out numberToKeep ) && snapshotsSetForPruning.Count > numberToKeep )
+        if ( snapshotsSetForPruning.Count > RetentionSettings.Weekly )
         {
-            numberToPrune = snapshotsSetForPruning.Count - numberToKeep;
+            numberToPrune = snapshotsSetForPruning.Count - RetentionSettings.Weekly;
             Logger.Debug( "Need to prune oldest {0} weekly snapshots from dataset {1}", numberToPrune, Name );
             snapshotsSetForPruning.Sort( );
             for ( int i = 0; i < numberToPrune; i++ )
@@ -200,9 +200,9 @@ public class Dataset : ZfsObjectBase
         snapshotsSetForPruning.Clear( );
         snapshotsSetForPruning = MonthlySnapshots.Where( s => s.PruneSnapshots ).ToList( );
         Logger.Debug( "Monthly snapshots of {0} available for pruning: {1}", Name, string.Join( ',', snapshotsSetForPruning.Select( s => s.Name ) ) );
-        if ( int.TryParse( Properties[ ZfsProperty.SnapshotRetentionMonthlyPropertyName ].Value, out numberToKeep ) && snapshotsSetForPruning.Count > numberToKeep )
+        if ( snapshotsSetForPruning.Count > RetentionSettings.Monthly )
         {
-            numberToPrune = snapshotsSetForPruning.Count - numberToKeep;
+            numberToPrune = snapshotsSetForPruning.Count - RetentionSettings.Monthly;
             Logger.Debug( "Need to prune oldest {0} monthly snapshots from dataset {1}", numberToPrune, Name );
             snapshotsSetForPruning.Sort( );
             for ( int i = 0; i < numberToPrune; i++ )
@@ -218,9 +218,9 @@ public class Dataset : ZfsObjectBase
         Logger.Debug( "Yearly snapshots of {0} available for pruning: {1}", Name, string.Join( ',', snapshotsSetForPruning.Select( s => s.Name ) ) );
         // Don't do this, so these all look the same
         // ReSharper disable once InvertIf
-        if ( int.TryParse( Properties[ ZfsProperty.SnapshotRetentionYearlyPropertyName ].Value, out numberToKeep ) && snapshotsSetForPruning.Count > numberToKeep )
+        if ( snapshotsSetForPruning.Count > RetentionSettings.Yearly )
         {
-            numberToPrune = snapshotsSetForPruning.Count - numberToKeep;
+            numberToPrune = snapshotsSetForPruning.Count - RetentionSettings.Yearly;
             Logger.Debug( "Need to prune oldest {0} yearly snapshots from dataset {1}", numberToPrune, Name );
             snapshotsSetForPruning.Sort( );
             for ( int i = 0; i < numberToPrune; i++ )
@@ -240,8 +240,7 @@ public class Dataset : ZfsObjectBase
     /// </summary>
     /// <param name="template">
     ///     The <see cref="TemplateSettings" /> object to check status against. Must have the
-    ///     <see cref="TemplateSettings.SnapshotRetention" /> and <see cref="TemplateSettings.SnapshotTiming" /> properties
-    ///     defined.
+    ///     <see cref="TemplateSettings.SnapshotTiming" /> property defined.
     /// </param>
     /// <param name="timestamp">The <see cref="DateTimeOffset" /> value to check against the last known snapshot of this type</param>
     /// <returns>
@@ -261,7 +260,7 @@ public class Dataset : ZfsObjectBase
     public bool IsFrequentSnapshotNeeded( TemplateSettings template, DateTimeOffset timestamp )
     {
         //Exit early if retention settings say no frequent
-        if ( !template.SnapshotRetention.IsFrequentWanted )
+        if ( !RetentionSettings.IsFrequentWanted )
         {
             return false;
         }
@@ -279,12 +278,8 @@ public class Dataset : ZfsObjectBase
     }
 
     /// <summary>
-    ///     Gets whether an hourly snapshot is needed, according to the provided <see cref="SnapshotRetentionSettings" /> and
-    ///     <paramref name="timestamp" />
+    ///     Gets whether an hourly snapshot is needed, according to the provided <paramref name="timestamp" />
     /// </summary>
-    /// <param name="retention">
-    ///     The <see cref="SnapshotRetentionSettings" /> object to check status against.
-    /// </param>
     /// <param name="timestamp">The <see cref="DateTimeOffset" /> value to check against the last known snapshot of this type</param>
     /// <returns>
     ///     A <see langword="bool" /> indicating whether ALL of the following conditions are met:
@@ -300,10 +295,10 @@ public class Dataset : ZfsObjectBase
     ///         </item>
     ///     </list>
     /// </returns>
-    public bool IsHourlySnapshotNeeded( SnapshotRetentionSettings retention, DateTimeOffset timestamp )
+    public bool IsHourlySnapshotNeeded( DateTimeOffset timestamp )
     {
         //Exit early if retention settings say no hourlies
-        if ( !retention.IsHourlyWanted )
+        if ( !RetentionSettings.IsHourlyWanted )
         {
             return false;
         }
@@ -324,9 +319,6 @@ public class Dataset : ZfsObjectBase
     ///     Gets whether a daily snapshot is needed, according to the provided <see cref="SnapshotRetentionSettings" /> and
     ///     <paramref name="timestamp" />
     /// </summary>
-    /// <param name="retention">
-    ///     The <see cref="SnapshotRetentionSettings" /> object to check status against.
-    /// </param>
     /// <param name="timestamp">The <see cref="DateTimeOffset" /> value to check against the last known snapshot of this type</param>
     /// <returns>
     ///     A <see langword="bool" /> indicating whether ALL of the following conditions are met:
@@ -342,10 +334,10 @@ public class Dataset : ZfsObjectBase
     ///         </item>
     ///     </list>
     /// </returns>
-    public bool IsDailySnapshotNeeded( SnapshotRetentionSettings retention, DateTimeOffset timestamp )
+    public bool IsDailySnapshotNeeded( DateTimeOffset timestamp )
     {
         //Exit early if retention settings say no dailies
-        if ( !retention.IsDailyWanted )
+        if ( !RetentionSettings.IsDailyWanted )
         {
             return false;
         }
@@ -368,8 +360,7 @@ public class Dataset : ZfsObjectBase
     /// </summary>
     /// <param name="template">
     ///     The <see cref="TemplateSettings" /> object to check status against. Must have the
-    ///     <see cref="TemplateSettings.SnapshotRetention" /> and <see cref="TemplateSettings.SnapshotTiming" /> properties
-    ///     defined.
+    ///     <see cref="TemplateSettings.SnapshotTiming" /> property defined.
     /// </param>
     /// <param name="timestamp">The <see cref="DateTimeOffset" /> value to check against the last known snapshot of this type</param>
     /// <returns>
@@ -393,7 +384,7 @@ public class Dataset : ZfsObjectBase
     public bool IsWeeklySnapshotNeeded( TemplateSettings template, DateTimeOffset timestamp )
     {
         //Exit early if retention settings say no weeklies
-        if ( !template.SnapshotRetention.IsWeeklyWanted )
+        if ( !RetentionSettings.IsWeeklyWanted )
         {
             return false;
         }
@@ -415,11 +406,6 @@ public class Dataset : ZfsObjectBase
     ///     Gets whether a monthly snapshot is needed, according to the provided <see cref="TemplateSettings" /> and
     ///     <paramref name="timestamp" />
     /// </summary>
-    /// <param name="template">
-    ///     The <see cref="TemplateSettings" /> object to check status against. Must have the
-    ///     <see cref="TemplateSettings.SnapshotRetention" /> and <see cref="TemplateSettings.SnapshotTiming" /> properties
-    ///     defined.
-    /// </param>
     /// <param name="timestamp">The <see cref="DateTimeOffset" /> value to check against the last known snapshot of this type</param>
     /// <returns>
     ///     A <see langword="bool" /> indicating whether ALL of the following conditions are met:
@@ -438,10 +424,10 @@ public class Dataset : ZfsObjectBase
     /// <remarks>
     ///     Uses culture-aware definitions of months, using the executing user's culture.
     /// </remarks>
-    public bool IsMonthlySnapshotNeeded( TemplateSettings template, DateTimeOffset timestamp )
+    public bool IsMonthlySnapshotNeeded( DateTimeOffset timestamp )
     {
         //Exit early if retention settings say no monthlies
-        if ( !template.SnapshotRetention.IsMonthlyWanted )
+        if ( !RetentionSettings.IsMonthlyWanted )
         {
             return false;
         }
@@ -465,9 +451,6 @@ public class Dataset : ZfsObjectBase
     ///     Gets whether a yearly snapshot is needed, according to the provided <see cref="SnapshotRetentionSettings" /> and
     ///     <paramref name="timestamp" />
     /// </summary>
-    /// <param name="retention">
-    ///     The <see cref="SnapshotRetentionSettings" /> object to check status against
-    /// </param>
     /// <param name="timestamp">The <see cref="DateTimeOffset" /> value to check against the last known snapshot of this type</param>
     /// <returns>
     ///     A <see langword="bool" /> indicating whether the last yearly snapshot is in the same year as
@@ -476,10 +459,10 @@ public class Dataset : ZfsObjectBase
     /// <remarks>
     ///     Uses culture-aware definitions of years, using the executing user's culture.
     /// </remarks>
-    public bool IsYearlySnapshotNeeded( SnapshotRetentionSettings retention, DateTimeOffset timestamp )
+    public bool IsYearlySnapshotNeeded( DateTimeOffset timestamp )
     {
         //Exit early if retention settings say no monthlies
-        if ( !retention.IsYearlyWanted )
+        if ( !RetentionSettings.IsYearlyWanted )
         {
             return false;
         }
