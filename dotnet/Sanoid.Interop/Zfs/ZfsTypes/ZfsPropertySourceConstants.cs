@@ -6,8 +6,12 @@
 
 namespace Sanoid.Interop.Zfs.ZfsTypes;
 
-internal enum SnapshotRecursionKind
+public static class ZfsPropertySourceConstants
 {
-    Default,
-    Zfs
+    public const string Default = "default";
+    public const string Inherited = "inherited";
+    public const string Local = "local";
+    public const string None = "-";
+    public const string Received = "received";
+    public const string Sanoid = "sanoid";
 }

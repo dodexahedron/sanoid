@@ -4,6 +4,7 @@
 // from http://www.gnu.org/licenses/gpl-3.0.html on 2014-11-17.  A copy should also be available in this
 // project's Git repository at https://github.com/jimsalterjrs/sanoid/blob/master/LICENSE.
 
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Text.Json;
 using NLog;
@@ -41,32 +42,22 @@ public interface IZfsCommandRunner
     ///     A boolean value indicating whether the operation succeeded (ie no exceptions were thrown).
     /// </returns>
     public bool TakeSnapshot( Dataset ds, SnapshotPeriod snapshotPeriod, DateTimeOffset timestamp, SanoidSettings settings, out Snapshot snapshot );
-    
+
     /// <summary>
     ///     Destroys a zfs snapshot
     /// </summary>
     /// <returns>
     ///     A boolean value indicating whether the operation succeeded (ie no exceptions were thrown).
     /// </returns>
-    public bool DestroySnapshot( Dataset ds, Snapshot snapshot, SanoidSettings settings );
-
-    /// <summary>
-    ///     Gets a <see cref="Dictionary{TKey,TValue}" /> of &lt;<see langword="string" />,<see cref="ZfsProperty" />&gt; for
-    ///     <paramref name="zfsObjectName" />
-    /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">
-    ///     If an invalid or uninitialized value is provided for paramref name="kind" />.
-    /// </exception>
-    /// <exception cref="ArgumentNullException">
-    ///     If <paramref name="zfsObjectName" /> is null, empty, or only whitespace
-    /// </exception>
-    /// <exception cref="InvalidOperationException">If the process execution threw this exception.</exception>
-    /// <exception cref="ArgumentException">If name validation fails for <paramref name="zfsObjectName" /></exception>
-    public Dictionary<string, ZfsProperty> GetZfsProperties( ZfsObjectKind kind, string zfsObjectName, bool sanoidOnly = true );
+    public Task<bool> DestroySnapshotAsync( Snapshot snapshot, SanoidSettings settings );
 
     /// <summary>
     ///     Sets the provided <see cref="ZfsProperty" /> values for <paramref name="zfsPath" />
     /// </summary>
+    /// <param name="dryRun">
+    ///     If true, instructs the method not to actually call the ZFS utility, but instead just report what
+    ///     it <em>would</em> have done.
+    /// </param>
     /// <param name="zfsPath">The fully-qualified path to operate on</param>
     /// <param name="properties">A parameterized array of <see cref="ZfsProperty" /> objects to set</param>
     /// <returns>
@@ -91,15 +82,13 @@ public interface IZfsCommandRunner
     ///     datasets in
     ///     zfs, with sanoid.net properties populated
     /// </returns>
-    public Dictionary<string, Dataset> GetZfsPoolRoots( );
+    public Task<ConcurrentDictionary<string, Dataset>> GetPoolRootsWithAllRequiredSanoidPropertiesAsync( );
 
     /// <summary>
-    ///     Gets all snapshots from zfs
+    ///     Gets everything Sanoid.net cares about from ZFS, via separate processes executing in parallel using the thread pool
     /// </summary>
-    /// <param name="datasets"></param>
-    /// <returns>
-    ///     A <see cref="Dictionary{TKey,TValue}" /> of <see langword="string" /> to <see cref="Snapshot" /> of all snapshots
-    ///     in all pools that were taken by Sanoid.net
-    /// </returns>
-    public Dictionary<string, Snapshot> GetZfsSanoidSnapshots( ref Dictionary<string, Dataset> datasets );
+    /// <param name="datasets">A collection of datasets for this method to finish populating.</param>
+    /// <param name="snapshots">A collection of snapshots for this method to populate</param>
+    /// <remarks>Up to one additional thread per existing item in <paramref name="datasets" /> will be spawned</remarks>
+    public Task GetDatasetsAndSnapshotsFromZfsAsync( ConcurrentDictionary<string, Dataset> datasets, ConcurrentDictionary<string, Snapshot> snapshots );
 }

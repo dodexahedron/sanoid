@@ -4,6 +4,7 @@
 // from http://www.gnu.org/licenses/gpl-3.0.html on 2014-11-17.  A copy should also be available in this
 // project's Git repository at https://github.com/jimsalterjrs/sanoid/blob/master/LICENSE.
 
+using System.Collections.Concurrent;
 using NLog;
 using Sanoid.Interop.Zfs.ZfsTypes;
 using Sanoid.Settings.Settings;
@@ -18,10 +19,7 @@ public abstract class ZfsCommandRunnerBase : IZfsCommandRunner
     public abstract bool TakeSnapshot( Dataset ds, SnapshotPeriod period, DateTimeOffset timestamp, SanoidSettings settings, out Snapshot snapshot );
 
     /// <inheritdoc />
-    public abstract bool DestroySnapshot( Dataset ds, Snapshot snapshot, SanoidSettings settings );
-
-    /// <inheritdoc />
-    public abstract Dictionary<string, ZfsProperty> GetZfsProperties( ZfsObjectKind kind, string zfsObjectName, bool sanoidOnly = true );
+    public abstract Task<bool> DestroySnapshotAsync( Snapshot snapshot, SanoidSettings settings );
 
     /// <inheritdoc />
     public abstract bool SetZfsProperties( bool dryRun, string zfsPath, params ZfsProperty[] properties );
@@ -30,9 +28,8 @@ public abstract class ZfsCommandRunnerBase : IZfsCommandRunner
     public abstract Dictionary<string, Dataset> GetZfsDatasetConfiguration( string args = " -r" );
 
     /// <inheritdoc />
-    public abstract Dictionary<string, Dataset> GetZfsPoolRoots( );
+    public abstract Task<ConcurrentDictionary<string, Dataset>> GetPoolRootsWithAllRequiredSanoidPropertiesAsync( );
 
-    /// <param name="datasets"></param>
     /// <inheritdoc />
-    public abstract Dictionary<string, Snapshot> GetZfsSanoidSnapshots( ref Dictionary<string, Dataset> datasets );
+    public abstract Task GetDatasetsAndSnapshotsFromZfsAsync( ConcurrentDictionary<string, Dataset> datasets, ConcurrentDictionary<string, Snapshot> snapshots );
 }

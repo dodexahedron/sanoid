@@ -4,6 +4,7 @@
 // from http://www.gnu.org/licenses/gpl-3.0.html on 2014-11-17.  A copy should also be available in this
 // project's Git repository at https://github.com/jimsalterjrs/sanoid/blob/master/LICENSE.
 
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using PowerArgs;
@@ -23,7 +24,7 @@ internal class Program
     // Desired logging parameters should be set in Sanoid.nlog.json
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger( );
 
-    public static int Main( string[] argv )
+    public static async Task<int> Main( string[] argv )
     {
         LoggingSettings.ConfigureLogger( );
 
@@ -129,24 +130,26 @@ internal class Program
 
         Logger.Debug( "Using settings: {0}", JsonSerializer.Serialize( settings ) );
 
-        ( Dictionary<string, Dictionary<string, ZfsProperty>> missingPoolPropertyCollections, bool missingPropertiesFound ) = ZfsTasks.CheckZfsPropertiesSchema( zfsCommandRunner, args );
+        ZfsTasks.CheckZfsPropertiesSchemaResult schemaCheckResult = await ZfsTasks.CheckZfsPoolRootPropertiesSchemaAsync( zfsCommandRunner, args ).ConfigureAwait( true );
+
+        Logger.Debug( "Result of schema check is: {0}", JsonSerializer.Serialize( schemaCheckResult ) );
 
         // Check
         switch ( args )
         {
-            case { CheckZfsProperties: true } when !missingPropertiesFound:
+            case { CheckZfsProperties: true } when !schemaCheckResult.MissingPropertiesFound:
             {
                 // Requested check and no properties were missing.
                 // Return 0
                 return (int)Errno.EOK;
             }
-            case { CheckZfsProperties: true } when missingPropertiesFound:
+            case { CheckZfsProperties: true } when schemaCheckResult.MissingPropertiesFound:
             {
                 // Requested check and some properties were missing.
                 // Return ENOATTR (1093)
                 return (int)Errno.ENOATTR;
             }
-            case { CheckZfsProperties: false, PrepareZfsProperties: false } when missingPropertiesFound:
+            case { CheckZfsProperties: false, PrepareZfsProperties: false } when schemaCheckResult.MissingPropertiesFound:
             {
                 // Did not request check or update (normal run) but properties were missing.
                 // Cannot safely do anything useful
@@ -158,27 +161,26 @@ internal class Program
             {
                 // Requested schema update
                 // Run the update and return EOK or ENOATTR based on success of the updates
-                return ZfsTasks.UpdateZfsDatasetSchema( settings.DryRun, ref missingPoolPropertyCollections, zfsCommandRunner ) 
+                return ZfsTasks.UpdateZfsDatasetSchema( settings.DryRun, schemaCheckResult.MissingPoolPropertyCollections, zfsCommandRunner )
                     ? (int)Errno.EOK
                     : (int)Errno.ENOATTR;
             }
         }
 
-        // TODO: Make this a single pass
-        // This is pretty redundant.
-        // Since we are guaranteed a good schema from this point, we can just use list operations and
-        // just ask for filesystem,volume,snapshot, and process accordingly
-        Dictionary<string, Dataset> datasets = zfsCommandRunner.GetZfsDatasetConfiguration( );
+        ConcurrentDictionary<string, Dataset> datasets = schemaCheckResult.Datasets;
+        ConcurrentDictionary<string, Snapshot> snapshots = new( );
 
-        Logger.Trace( "Getting sanoid snapshots" );
-        Dictionary<string, Snapshot> snapshots = zfsCommandRunner.GetZfsSanoidSnapshots( ref datasets );
-        Logger.Trace( "Finished getting sanoid snapshots" );
+        Logger.Debug( "Getting remaining datasets and all snapshots from ZFS" );
+
+        await ZfsTasks.GetDatasetsAndSnapshotsFromZfsAsync( zfsCommandRunner, settings, datasets, snapshots ).ConfigureAwait( true );
+
+        Logger.Debug( "Finished getting datasets and snapshots from ZFS" );
 
         // Handle taking new snapshots, if requested
         if ( settings is { TakeSnapshots: true } )
         {
             Logger.Debug( "TakeSnapshots is true. Taking configured snapshots using timestamp {0:O}", currentTimestamp );
-            ZfsTasks.TakeAllConfiguredSnapshots( zfsCommandRunner, settings, currentTimestamp, ref datasets );
+            ZfsTasks.TakeAllConfiguredSnapshots( zfsCommandRunner, settings, currentTimestamp, datasets );
         }
         else
         {
@@ -189,7 +191,7 @@ internal class Program
         if ( settings is { PruneSnapshots: true } )
         {
             Logger.Debug( "PruneSnapshots is true. Pruning configured snapshots" );
-            ZfsTasks.PruneAllConfiguredSnapshots( zfsCommandRunner, settings, currentTimestamp, ref datasets );
+            await ZfsTasks.PruneAllConfiguredSnapshotsAsync( zfsCommandRunner, settings, datasets ).ConfigureAwait( true );
         }
         else
         {
@@ -201,7 +203,6 @@ internal class Program
         Logger.Fatal( "This program will now exit with an error (status 38 - ENOSYS) to prevent accidental usage in scripts." );
 
 // Let's be tidy and clean up the default mutex ourselves
-        Mutexes.ReleaseMutex( );
         Mutexes.DisposeMutexes( );
 
 // Be sure we clean up any mutexes we have acquired, and log warnings for those that this has to deal with.

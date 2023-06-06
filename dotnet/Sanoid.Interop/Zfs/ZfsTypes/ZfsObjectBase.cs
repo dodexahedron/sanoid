@@ -54,6 +54,8 @@ public abstract class ZfsObjectBase
         Properties = new( );
     }
 
+    private readonly object _propertiesDictionaryLock = new( );
+
     public ZfsProperty? this[ string key ]
     {
         get
@@ -165,6 +167,8 @@ public abstract class ZfsObjectBase
             throw new ArgumentOutOfRangeException( nameof( name ), "name must be 255 characters or less" );
         }
 
+        // Sure they are... They're handled by the default case.
+        // ReSharper disable once SwitchExpressionHandlesSomeKnownEnumValuesWithExceptionInDefault
         validatorRegex ??= kind switch
         {
             ZfsObjectKind.FileSystem => ZfsIdentifierRegexes.DatasetNameRegex( ),
@@ -204,9 +208,35 @@ public abstract class ZfsObjectBase
     ///     Adds the <see cref="ZfsProperty" /> <paramref name="prop" /> to this <see name="ZfsObjectBase" />
     /// </summary>
     /// <param name="prop">The property to add</param>
-    public void AddProperty( ZfsProperty prop )
+    public ZfsProperty AddOrUpdateProperty( ZfsProperty prop )
     {
-        Logger.Trace( "Adding property {0} to Properties collection of {1}", prop, Name );
-        Properties[ prop.Name ] = prop;
+        lock ( _propertiesDictionaryLock )
+        {
+            return Properties[ prop.Name ] = prop;
+        }
+    }
+
+    /// <exception cref="ArgumentNullException"><paramref name="propertyName" /> is <see langword="null" />.</exception>
+    public ZfsProperty AddOrUpdateProperty( string propertyName, string propertyValue, string propertyValueSource )
+    {
+        // Unfortunately, the AddOrUpdate method isn't atomic, so we need to enforce a lock ourselves
+        // There's no built-in atomic way to perform a check for the key, update if it exists, and insert if not.
+        // It can only atomically test and perform one operation
+        lock ( _propertiesDictionaryLock )
+        {
+            return Properties.AddOrUpdate( propertyName, AddValueFactory, UpdateValueFactory );
+
+            ZfsProperty UpdateValueFactory( string key, ZfsProperty oldProperty )
+            {
+                oldProperty.Value = propertyValue;
+                oldProperty.Source = propertyValueSource;
+                return oldProperty;
+            }
+
+            ZfsProperty AddValueFactory( string arg )
+            {
+                return new( propertyName, propertyValue, propertyValueSource );
+            }
+        }
     }
 }

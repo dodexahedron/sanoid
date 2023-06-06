@@ -23,9 +23,9 @@ public class Snapshot : ZfsObjectBase, IComparable<Snapshot>, IEquatable<Snapsho
     {
         get
         {
-            if ( !Properties.TryGetValue( SnapshotProperty.SnapshotNamePropertyName, out ZfsProperty? prop ) )
+            if ( !Properties.TryGetValue( ZfsProperty.SnapshotNamePropertyName, out ZfsProperty? prop ) )
             {
-                throw new InvalidOperationException( "snapshotname property not defined on Snapshot" );
+                throw new InvalidOperationException( "snapshot:name property not defined on Snapshot" );
             }
 
             int sliceEnd = prop.Value.IndexOf( '@' );
@@ -37,9 +37,9 @@ public class Snapshot : ZfsObjectBase, IComparable<Snapshot>, IEquatable<Snapsho
     {
         get
         {
-            if ( !Properties.TryGetValue( SnapshotProperty.PeriodPropertyName, out ZfsProperty? prop ) )
+            if ( !Properties.TryGetValue( ZfsProperty.SnapshotPeriodPropertyName, out ZfsProperty? prop ) )
             {
-                throw new InvalidOperationException( "snapshotperiod property not defined on Snapshot" );
+                throw new InvalidOperationException( "snapshot:period property not defined on Snapshot" );
             }
 
             return (SnapshotPeriod)prop.Value;
@@ -50,9 +50,9 @@ public class Snapshot : ZfsObjectBase, IComparable<Snapshot>, IEquatable<Snapsho
     {
         get
         {
-            if ( !Properties.TryGetValue( SnapshotProperty.TimestampPropertyName, out ZfsProperty? prop ) )
+            if ( !Properties.TryGetValue( ZfsProperty.SnapshotTimestampPropertyName, out ZfsProperty? prop ) )
             {
-                throw new InvalidOperationException( "snapshottimestamp property not defined on Snapshot" );
+                throw new InvalidOperationException( "snapshot:timestamp property not defined on Snapshot" );
             }
 
             if ( !DateTimeOffset.TryParse( prop.Value, out DateTimeOffset result ) )
@@ -100,7 +100,7 @@ public class Snapshot : ZfsObjectBase, IComparable<Snapshot>, IEquatable<Snapsho
     ///             <term>Condition</term><description>Result</description>
     ///         </listheader>
     ///         <item>
-    ///             <term>Other <see cref="Snapshot?" /> is null or has a null <see cref="Timestamp" /></term>
+    ///             <term>Other <see cref="Snapshot" /> is null or has a null <see cref="Timestamp" /></term>
     ///             <description>This <see cref="Snapshot" /> precedes <paramref name="other" /> in the sort order.</description>
     ///         </item>
     ///         <item>
@@ -145,25 +145,51 @@ public class Snapshot : ZfsObjectBase, IComparable<Snapshot>, IEquatable<Snapsho
         }
 
         // If timestamps are different, sort on period
-        if ( Period != other.Period )
-        {
-            return Period.CompareTo( other.Period );
-        }
-
-        // If periods are the same, sort by name
-        return Name.CompareTo( other.Name );
+        return Period != other.Period ? Period.CompareTo( other.Period ) :
+            // If periods are the same, sort by name
+            Name.CompareTo( other.Name );
     }
 
-    public static Snapshot GetSnapshotForCommandRunner( Dataset ds, SnapshotPeriod period, DateTimeOffset timestamp, SanoidSettings settings )
+    /// <inheritdoc />
+    public bool Equals( Snapshot? other )
+    {
+        // First, check for reference equality
+        if ( ReferenceEquals( this, other ) )
+        {
+            return true;
+        }
+
+        // If the other is null, obviously we're not equal
+        if ( other == null )
+        {
+            return false;
+        }
+
+        // If our names are the same, we're the same snapshot
+        return Name == other.Name;
+    }
+
+    /// <inheritdoc />
+    public override bool Equals( object? obj )
+    {
+        return obj is Snapshot s && Equals( s );
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Delegates responsibility for this to <see cref="ZfsObjectBase.Name" /></remarks>
+    public override int GetHashCode( )
+    {
+        return Name.GetHashCode( );
+    }
+
+    public static Snapshot GetNewSnapshotForCommandRunner( Dataset ds, SnapshotPeriod period, DateTimeOffset timestamp, SanoidSettings settings )
     {
         string snapshotName = settings.Templates[ ds.Template ].GenerateFullSnapshotName( ds.Name, period.Kind, timestamp, settings.Formatting );
         Snapshot newSnapshot = new( snapshotName );
-        newSnapshot.AddProperty( SnapshotProperty.GetNewSnapshotProperty( SnapshotProperty.SnapshotPropertyKind.Name, snapshotName, ZfsPropertySource.Local ) );
-        newSnapshot.AddProperty( SnapshotProperty.GetNewSnapshotProperty( SnapshotProperty.SnapshotPropertyKind.Period, period, ZfsPropertySource.Local ) );
-        newSnapshot.AddProperty( SnapshotProperty.GetNewSnapshotProperty( SnapshotProperty.SnapshotPropertyKind.Timestamp, timestamp.ToString( "O" ), ZfsPropertySource.Local ) );
-        newSnapshot.AddProperty( SnapshotProperty.GetNewSnapshotProperty( SnapshotProperty.SnapshotPropertyKind.Recursion, ds.Recursion, ZfsPropertySource.Local ) );
-        newSnapshot.AddProperty( SnapshotProperty.GetNewSnapshotProperty( SnapshotProperty.SnapshotPropertyKind.Template, ds.Template, ZfsPropertySource.Local ) );
-        newSnapshot.AddProperty( SnapshotProperty.GetNewSnapshotProperty( SnapshotProperty.SnapshotPropertyKind.Prune, ds.PruneSnapshots.ToString( ), ZfsPropertySource.Local ) );
+        newSnapshot.AddOrUpdateProperty( new( ZfsProperty.SnapshotNamePropertyName, snapshotName, ZfsPropertySourceConstants.Local ) );
+        newSnapshot.AddOrUpdateProperty( new( ZfsProperty.SnapshotPeriodPropertyName, period, ZfsPropertySourceConstants.Local ) );
+        newSnapshot.AddOrUpdateProperty( new( ZfsProperty.SnapshotTimestampPropertyName, timestamp.ToString( "O" ), ZfsPropertySourceConstants.Local ) );
+        newSnapshot.AddOrUpdateProperty( new( ZfsProperty.RecursionPropertyName, ds.Recursion, ZfsPropertySourceConstants.Local ) );
         return newSnapshot;
     }
 
@@ -171,7 +197,7 @@ public class Snapshot : ZfsObjectBase, IComparable<Snapshot>, IEquatable<Snapsho
     ///     Gets a new <see cref="Snapshot" /> from a string array in a pre-defined order
     /// </summary>
     /// <param name="lineTokens">
-    ///     A string array that must be in the order of the <see cref="SnapshotProperty.KnownSnapshotProperties" /> collection
+    ///     A string array that must be in the order of the <see cref="ZfsProperty.KnownSnapshotProperties" /> collection
     /// </param>
     /// <returns>
     ///     A new <see cref="Snapshot" /> from the input array
@@ -207,68 +233,19 @@ public class Snapshot : ZfsObjectBase, IComparable<Snapshot>, IEquatable<Snapsho
     /// </remarks>
     public static Snapshot FromListSnapshots( string[] lineTokens )
     {
-        if ( lineTokens.Length < SnapshotProperty.KnownSnapshotProperties.Count )
+        if ( lineTokens.Length < ZfsProperty.KnownSnapshotProperties.Count + 1 )
         {
             const string errorMessage = "Not enough elements in array";
             Logger.Error( errorMessage );
             throw new ArgumentException( errorMessage, nameof( lineTokens ) );
         }
 
-        if ( !ValidateName( ZfsObjectKind.Snapshot, lineTokens[ 2 ] ) )
-        {
-            string errorMessage = $"Snapshot name {lineTokens[ 2 ]} is invalid";
-            Logger.Error( errorMessage );
-            throw new ArgumentException( errorMessage, nameof( lineTokens ) );
-        }
+        Snapshot snap = new( lineTokens[ 0 ] );
 
-        Snapshot snap = new( lineTokens[ 2 ] )
+        for ( int i = 1; i < lineTokens.Length; i++ )
         {
-            [ ZfsProperty.PruneSnapshotsPropertyName ] = new( ZfsProperty.PruneSnapshotsPropertyName, lineTokens[ 0 ], ZfsPropertySource.Local ),
-            [ ZfsProperty.RecursionPropertyName ] = new( ZfsProperty.RecursionPropertyName, lineTokens[ 1 ], ZfsPropertySource.Local ),
-            [ SnapshotProperty.SnapshotNamePropertyName ] = new( SnapshotProperty.SnapshotNamePropertyName, lineTokens[ 2 ], ZfsPropertySource.Local ),
-            [ SnapshotProperty.PeriodPropertyName ] = new( SnapshotProperty.PeriodPropertyName, lineTokens[ 3 ], ZfsPropertySource.Local ),
-            [ SnapshotProperty.TimestampPropertyName ] = new( SnapshotProperty.TimestampPropertyName, lineTokens[ 4 ], ZfsPropertySource.Local ),
-            [ ZfsProperty.TemplatePropertyName ] = new( ZfsProperty.TemplatePropertyName, lineTokens[ 5 ], ZfsPropertySource.Local )
-        };
+            snap.AddOrUpdateProperty( ZfsProperty.KnownSnapshotProperties[ i - 1 ], lineTokens[ i ], "local" );
+        }
         return snap;
-    }
-
-    public class SnapshotReverseComparer : IComparer<Snapshot>
-    {
-        /// <inheritdoc />
-        public int Compare( Snapshot? x, Snapshot? y )
-        {
-            if ( x == null && y == null )
-            {
-                return 0;
-            }
-
-            if ( x != null && y == null )
-            {
-                return 1;
-            }
-
-            if ( x == null && y != null )
-            {
-                return -1;
-            }
-
-            return 0 - x!.CompareTo( y );
-        }
-    }
-
-    /// <inheritdoc />
-    public bool Equals( Snapshot? other )
-    {
-        // First, check for reference equality
-        if(ReferenceEquals(this,other))
-            return true;
-
-        // If the other is null, obviously we're not equal
-        if( other == null )
-            return false;
-
-        // If our names are the same, we're the same snapshot
-        return Name == other.Name;
     }
 }
