@@ -24,13 +24,20 @@ public class Dataset : ZfsObjectBase
     /// </summary>
     /// <param name="name">The name of the new <see cref="Dataset" /></param>
     /// <param name="kind">The <see cref="DatasetKind" /> of Dataset to create</param>
+    /// <param name="poolRoot">
+    ///     The root dataset for this dataset. Null for roots.
+    /// </param>
+    /// <param name="isKnownPoolRoot">
+    ///     Short-circuit if this dataset is known to be a pool root at instantiation, to avoid
+    ///     string lookup
+    /// </param>
     /// <param name="validateName">
     ///     Whether to validate the name of the new <see cref="Dataset" /> (<see langword="true" />) or
     ///     not (<see langword="false" /> - default)
     /// </param>
     /// <param name="validatorRegex">The <see cref="Regex" /> to user for name validation</param>
-    public Dataset( string name, DatasetKind kind, bool validateName = false, Regex? validatorRegex = null )
-        : base( name, (ZfsObjectKind)kind, validatorRegex, validateName )
+    public Dataset( string name, DatasetKind kind, Dataset? poolRoot = null, bool isKnownPoolRoot = false, bool validateName = false, Regex? validatorRegex = null )
+        : base( name, (ZfsObjectKind)kind, poolRoot, isKnownPoolRoot, validateName, validatorRegex )
     {
     }
 
@@ -107,12 +114,29 @@ public class Dataset : ZfsObjectBase
     public List<Snapshot> GetSnapshotsToPrune( )
     {
         Logger.Debug( "Getting list of snapshots to prune for dataset {0}", Name );
+        if ( !Enabled )
+        {
+            Logger.Debug( "Dataset {0} is disabled. Skipping pruning", Name );
+            return new( );
+        }
+
+        Logger.Debug( "Checking prune deferral setting for dataset {0}", Name );
+        if ( PruneDeferral != 0 && PoolUsedCapacity < PruneDeferral )
+        {
+            Logger.Info( "Pool used capacity for {0} ({1}%) is below prune deferral threshold of {2}%. Skipping pruning of {0}", Name, PoolUsedCapacity, PruneDeferral );
+            return new( );
+        }
+
+        if ( PruneDeferral == 0 )
+        {
+            Logger.Debug( "Prune deferral not enabled for {0}", Name );
+        }
+
         List<Snapshot> snapshotsToPrune = new( );
         List<Snapshot> snapshotsSetForPruning = FrequentSnapshots.Where( s => s.PruneSnapshots ).ToList( );
         Logger.Debug( "Frequent snapshots of {0} available for pruning: {1}", Name, string.Join( ',', snapshotsSetForPruning.Select( s => s.Name ) ) );
         int numberToPrune;
-        int numberToKeep;
-        if ( int.TryParse( Properties[ ZfsProperty.SnapshotRetentionFrequentPropertyName ].Value, out numberToKeep ) && snapshotsSetForPruning.Count > numberToKeep )
+        if ( int.TryParse( Properties[ ZfsProperty.SnapshotRetentionFrequentPropertyName ].Value, out int numberToKeep ) && snapshotsSetForPruning.Count > numberToKeep )
         {
             numberToPrune = snapshotsSetForPruning.Count - numberToKeep;
             Logger.Debug( "Need to prune oldest {0} frequent snapshots from dataset {1}", numberToPrune, Name );

@@ -52,6 +52,13 @@ public interface IZfsCommandRunner
     public Task<bool> DestroySnapshotAsync( Snapshot snapshot, SanoidSettings settings );
 
     /// <summary>
+    /// Gets the capacity property from zfs for the pool roots specified and sets it on the corresponding Dataset objects
+    /// </summary>
+    /// <param name="datasets"></param>
+    /// <returns>A boolean indicating success or failure of the operation</returns>
+    public Task<bool> GetPoolCapacitiesAsync( ConcurrentDictionary<string, Dataset> datasets );
+
+    /// <summary>
     ///     Sets the provided <see cref="ZfsProperty" /> values for <paramref name="zfsPath" />
     /// </summary>
     /// <param name="dryRun">
@@ -82,7 +89,7 @@ public interface IZfsCommandRunner
     ///     datasets in
     ///     zfs, with sanoid.net properties populated
     /// </returns>
-    public Task<ConcurrentDictionary<string, Dataset>> GetPoolRootsWithAllRequiredSanoidPropertiesAsync( );
+    public Task<ConcurrentDictionary<string, Dataset>> GetPoolRootDatasetsWithAllRequiredSanoidPropertiesAsync( );
 
     /// <summary>
     ///     Gets everything Sanoid.net cares about from ZFS, via separate processes executing in parallel using the thread pool
@@ -91,4 +98,7 @@ public interface IZfsCommandRunner
     /// <param name="snapshots">A collection of snapshots for this method to populate</param>
     /// <remarks>Up to one additional thread per existing item in <paramref name="datasets" /> will be spawned</remarks>
     public Task GetDatasetsAndSnapshotsFromZfsAsync( ConcurrentDictionary<string, Dataset> datasets, ConcurrentDictionary<string, Snapshot> snapshots );
+
+    public IAsyncEnumerable<string> ZpoolExecEnumerator( string verb, string args );
+    public IAsyncEnumerable<string> ZfsExecEnumerator( string verb, string args );
 }

@@ -22,14 +22,20 @@ public abstract class ZfsCommandRunnerBase : IZfsCommandRunner
     public abstract Task<bool> DestroySnapshotAsync( Snapshot snapshot, SanoidSettings settings );
 
     /// <inheritdoc />
+    public abstract Task<bool> GetPoolCapacitiesAsync( ConcurrentDictionary<string, Dataset> datasets );
+
+    /// <inheritdoc />
     public abstract bool SetZfsProperties( bool dryRun, string zfsPath, params ZfsProperty[] properties );
 
     /// <inheritdoc />
     public abstract Dictionary<string, Dataset> GetZfsDatasetConfiguration( string args = " -r" );
 
     /// <inheritdoc />
-    public abstract Task<ConcurrentDictionary<string, Dataset>> GetPoolRootsWithAllRequiredSanoidPropertiesAsync( );
+    public abstract Task<ConcurrentDictionary<string, Dataset>> GetPoolRootDatasetsWithAllRequiredSanoidPropertiesAsync( );
 
     /// <inheritdoc />
     public abstract Task GetDatasetsAndSnapshotsFromZfsAsync( ConcurrentDictionary<string, Dataset> datasets, ConcurrentDictionary<string, Snapshot> snapshots );
+
+    public abstract IAsyncEnumerable<string> ZpoolExecEnumerator( string verb, string args );
+    public abstract IAsyncEnumerable<string> ZfsExecEnumerator( string verb, string args );
 }

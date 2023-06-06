@@ -19,6 +19,11 @@ public abstract class ZfsObjectBase
     /// </summary>
     /// <param name="name">The name of the new <see cref="ZfsObjectBase" /></param>
     /// <param name="kind">The <see cref="ZfsObjectKind" /> of object to create</param>
+    /// <param name="poolRoot"></param>
+    /// <param name="isKnownPoolRoot">
+    ///     Short-circuit if this dataset is known to be a pool root at instantiation, to avoid
+    ///     string lookup
+    /// </param>
     /// <param name="validateName">
     ///     If true, the constructor will perform name validation for the type of object being created.
     /// </param>
@@ -26,10 +31,20 @@ public abstract class ZfsObjectBase
     ///     An optional <see cref="Regex" />. If left null, uses a Regex from <see cref="ZfsIdentifierRegexes" /> based on
     ///     <paramref name="kind" />
     /// </param>
-    protected internal ZfsObjectBase( string name, ZfsObjectKind kind, Regex? nameValidatorRegex = null, bool validateName = false )
+    protected internal ZfsObjectBase( string name, ZfsObjectKind kind, ZfsObjectBase? poolRoot = null, bool isKnownPoolRoot = false, bool validateName = false, Regex? nameValidatorRegex = null )
     {
         Logger.Debug( "Creating new ZfsObjectBase {0} of kind {1}", name, kind );
         ZfsKind = kind;
+        IsPoolRoot = isKnownPoolRoot || name.IndexOf( '/' ) == -1;
+        if ( IsPoolRoot )
+        {
+            PoolRoot = this;
+        }
+        else
+        {
+            PoolRoot = poolRoot ?? throw new ArgumentNullException( nameof( poolRoot ) );
+        }
+
         NameValidatorRegex = nameValidatorRegex ?? kind switch
         {
             ZfsObjectKind.FileSystem => ZfsIdentifierRegexes.DatasetNameRegex( ),
@@ -54,7 +69,11 @@ public abstract class ZfsObjectBase
         Properties = new( );
     }
 
+    private int _poolUsedCapacity;
+
     private readonly object _propertiesDictionaryLock = new( );
+
+    public bool IsPoolRoot { get; }
 
     public ZfsProperty? this[ string key ]
     {
@@ -96,10 +115,61 @@ public abstract class ZfsObjectBase
     [JsonIgnore]
     internal Regex NameValidatorRegex { get; }
 
+    [JsonIgnore]
+    public ZfsObjectBase PoolRoot { get; }
+
+    internal int PoolUsedCapacity
+    {
+        get => IsPoolRoot ? _poolUsedCapacity : PoolRoot.PoolUsedCapacity;
+        set
+        {
+            if ( IsPoolRoot )
+            {
+                _poolUsedCapacity = value;
+            }
+            else
+            {
+                Logger.Error( "Invalid attempt to set capacity on non-root object {0}", Name );
+            }
+        }
+    }
+
     /// <summary>
-    ///     A dcitionary of property names and their values, as strings
+    ///     A dictionary of property names and their values, as strings
     /// </summary>
     public ConcurrentDictionary<string, ZfsProperty> Properties { get; }
+
+    /// <summary>
+    ///     Gets the sanoid.net:retention:prunedeferral property, or 0, if not defined
+    /// </summary>
+    public int PruneDeferral
+    {
+        get
+        {
+            Logger.Trace( "Trying to get {0} property for {1}", ZfsProperty.SnapshotRetentionPruneDeferralPropertyName, Name );
+            bool gotValue = Properties.TryGetValue( ZfsProperty.SnapshotRetentionPruneDeferralPropertyName, out ZfsProperty? prop );
+            if ( gotValue )
+            {
+                Logger.Trace( "Got property {0} from {1}", prop, Name );
+            }
+            else
+            {
+                Logger.Trace( "{0} property not found in {1}", ZfsProperty.SnapshotRetentionPruneDeferralPropertyName, Name );
+            }
+
+            if ( prop is null )
+            {
+                return 0;
+            }
+
+            if ( string.IsNullOrWhiteSpace( prop.Value ) )
+            {
+                return 0;
+            }
+
+            return int.TryParse( prop.Value, out int result ) ? result : 0;
+        }
+    }
 
     public bool PruneSnapshots
     {
@@ -129,6 +199,8 @@ public abstract class ZfsObjectBase
             return bool.TryParse( prop.Value, out bool result ) && result;
         }
     }
+
+    public string RootName => Name.GetZfsPathRoot( );
 
     public ZfsObjectKind ZfsKind { get; }
 

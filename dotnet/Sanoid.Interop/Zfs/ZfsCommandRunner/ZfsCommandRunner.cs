@@ -23,12 +23,46 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
     /// <param name="pathToZfs">
     ///     A fully-qualified path to the zfs executable
     /// </param>
-    public ZfsCommandRunner( string pathToZfs )
+    /// <param name="pathToZpool">
+    ///     A fully-qualified path to the zpool executable
+    /// </param>
+    /// <exception cref="ArgumentNullException">
+    ///     If either <paramref name="pathToZfs" /> or <paramref name="pathToZpool" /> is
+    ///     null, empty or whitespace
+    /// </exception>
+    /// <exception cref="FileNotFoundException">
+    ///     If either <paramref name="pathToZfs" /> or <paramref name="pathToZpool" /> do
+    ///     not refer to a valid existing file path
+    /// </exception>
+    public ZfsCommandRunner( string pathToZfs, string pathToZpool )
     {
+        if ( string.IsNullOrWhiteSpace( pathToZfs ) )
+        {
+            throw new ArgumentNullException( nameof( pathToZfs ), "Path to zfs utility cannot be null" );
+        }
+
+        if ( !File.Exists( pathToZfs ) )
+        {
+            throw new FileNotFoundException( "Path to zfs utility must be a valid and accessible path." );
+        }
+
+        if ( string.IsNullOrWhiteSpace( pathToZpool ) )
+        {
+            throw new ArgumentNullException( nameof( pathToZpool ), "Path to zpool utility cannot be null" );
+        }
+
+        if ( !File.Exists( pathToZpool ) )
+        {
+            throw new FileNotFoundException( "Path to zpool utility must be a valid and accessible path." );
+        }
+
         PathToZfsUtility = pathToZfs;
+        PathToZpoolUtility = pathToZpool;
     }
 
     private string PathToZfsUtility { get; }
+
+    private string PathToZpoolUtility { get; }
 
     private new static readonly Logger Logger = LogManager.GetCurrentClassLogger( );
 
@@ -92,7 +126,6 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
     /// <inheritdoc />
     public override async Task<bool> DestroySnapshotAsync( Snapshot snapshot, SanoidSettings settings )
     {
-        //todo: make this async too
         Logger.Debug( "Requested to destroy snapshot {0}", snapshot.Name );
         try
         {
@@ -147,6 +180,40 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
             Logger.Error( e, "Error running {0} {1}. Snapshot may still exist", zfsDestroyStartInfo.FileName, zfsDestroyStartInfo.Arguments );
             return false;
         }
+    }
+
+    /// <inheritdoc />
+    public override async Task<bool> GetPoolCapacitiesAsync( ConcurrentDictionary<string, Dataset> datasets )
+    {
+        Logger.Debug( "Requested pool root capacities" );
+        bool errorsEncountered = false;
+        await foreach ( string zpoolListLine in ZpoolExecEnumerator( "list", $"-Hpo name,capacity {string.Join( ' ', datasets.Keys )}" ) )
+        {
+            string[] lineTokens = zpoolListLine.Split( '\t', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries );
+            string poolName = lineTokens[ 0 ];
+            string poolCapacityString = lineTokens[ 1 ];
+            Logger.Debug( "Pool {0} capacity is {1}", poolName, poolCapacityString );
+            if ( datasets.TryGetValue( poolName, out Dataset? poolRoot ) && poolRoot is { IsPoolRoot: true } )
+            {
+                if ( int.TryParse( poolCapacityString, out int usedCapacity ) )
+                {
+                    Logger.Debug( "Setting dataset object {0} pool used capacity to {1}", poolName, usedCapacity );
+                    poolRoot.PoolUsedCapacity = usedCapacity;
+                }
+                else
+                {
+                    Logger.Error( "Failed to parse capacity for pool {0}. Prune deferral setting may be incorrect", poolName );
+                    errorsEncountered = true;
+                }
+            }
+            else if ( !datasets.ContainsKey( poolName ) )
+            {
+                Logger.Error( "Pool root {0} does not exist in current program state. Prune deferral setting may be incorrect", poolName );
+                errorsEncountered = true;
+            }
+        }
+
+        return errorsEncountered;
     }
 
     /// <inheritdoc />
@@ -300,7 +367,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
     }
 
     /// <inheritdoc />
-    public override async Task<ConcurrentDictionary<string, Dataset>> GetPoolRootsWithAllRequiredSanoidPropertiesAsync( )
+    public override async Task<ConcurrentDictionary<string, Dataset>> GetPoolRootDatasetsWithAllRequiredSanoidPropertiesAsync( )
     {
         ConcurrentDictionary<string, Dataset> result = new( );
         Logger.Debug( "Requested pool root configuration" );
@@ -341,7 +408,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
             if ( !result.ContainsKey( dsName ) )
             {
                 Logger.Debug( "Key not in result. Creating new dataset {0}", dsName );
-                result[ dsName ] = new( dsName, DatasetKind.FileSystem );
+                result[ dsName ] = new( dsName, DatasetKind.FileSystem, null, true );
             }
 
             Logger.Debug( "Adding property {0}({1} , {2}) to {3}", propertyName, propertyValue, propertyValueSource, dsName );
@@ -391,11 +458,11 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
                 string dsName = zfsListTokens[ 0 ];
                 string propertyName = zfsListTokens[ 1 ];
                 string propertyValue = zfsListTokens[ 2 ];
-                Logger.Debug("Checking for existence of dataset {0} in collection", dsName);
+                Logger.Debug( "Checking for existence of dataset {0} in collection", dsName );
                 if ( !datasets.ContainsKey( dsName ) )
                 {
                     Logger.Debug( "Dataset {0} not in collection. Attempting to add using Name: {0}, Kind: {1}", dsName, propertyValue );
-                    if ( datasets.TryAdd( dsName, new( dsName, propertyValue.ToDatasetKind( ) ) ) )
+                    if ( datasets.TryAdd( dsName, new( dsName, propertyValue.ToDatasetKind( ), datasets[ poolRootName ] ) ) )
                     {
                         Logger.Debug( "Added Dataset {0} to collection", dsName );
                         continue;
@@ -441,7 +508,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
                     continue;
                 }
 
-                Snapshot snap = Snapshot.FromListSnapshots( zfsListTokens );
+                Snapshot snap = Snapshot.FromListSnapshots( zfsListTokens, datasets );
                 string snapDatasetName = snap.DatasetName;
                 if ( !datasets.ContainsKey( snapDatasetName ) )
                 {
@@ -460,17 +527,24 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
     }
 
     /// <summary>
-    ///     Raw call to ZFS get with any supplied parameters that yields a string enumerator, which provides a line-by-line
+    ///     Raw call to the zfs utility with any supplied verb and parameters that yields a string enumerator, which provides a
+    ///     line-by-line
     ///     enumeration of the output of the command.
     /// </summary>
     /// <param name="verb"></param>
     /// <param name="args"></param>
     /// <returns>
-    ///     An <see cref="IEnumerable{T}" /> of <see langword="string" />s, iterating over the output of the zfs get
-    ///     operation
+    ///     An <see cref="IEnumerable{T}" /> of <see langword="string" />s, iterating over the output of the zfs operation
     /// </returns>
-    private async IAsyncEnumerable<string> ZfsExecEnumerator( string verb, string args )
+    public override async IAsyncEnumerable<string> ZfsExecEnumerator( string verb, string args )
     {
+        ValidateCommonExecArguments( verb, args );
+
+        if ( verb is not "get" and not "list" )
+        {
+            throw new ArgumentOutOfRangeException( nameof( verb ), "Only get and list verbs are permitted for zfs enumerator operations" );
+        }
+
         ProcessStartInfo zfsGetStartInfo = new( PathToZfsUtility, $"{verb} {args}" )
         {
             CreateNoWindow = true,
@@ -495,6 +569,65 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
             {
                 yield return ( await zfsGetProcess.StandardOutput.ReadLineAsync( ).ConfigureAwait( true ) )!;
             }
+        }
+    }
+
+    /// <summary>
+    ///     Raw call to the zpool utility with any supplied <paramref name="verb" /> and <paramref name="args" /> that yields a
+    ///     string enumerator, which provides a line-by-line
+    ///     enumeration of the output of the command.
+    /// </summary>
+    /// <param name="verb">The verb (list or get) to use</param>
+    /// <param name="args">The arguments to supply after the verb</param>
+    /// <returns>
+    ///     An <see cref="IEnumerable{T}" /> of <see langword="string" />s, iterating over the output of the zpool operation
+    /// </returns>
+    public override async IAsyncEnumerable<string> ZpoolExecEnumerator( string verb, string args )
+    {
+        ValidateCommonExecArguments( verb, args );
+
+        if ( verb is not "get" and not "list" )
+        {
+            throw new ArgumentOutOfRangeException( nameof( verb ), "Only get and list verbs are permitted for zpool enumerator operations" );
+        }
+
+        ProcessStartInfo zpoolExecStartInfo = new( PathToZpoolUtility, $"{verb} {args}" )
+        {
+            CreateNoWindow = true,
+            RedirectStandardOutput = true
+        };
+        Logger.Debug( "Preparing to execute `{0} {1} {2}` and yield an enumerator for output", PathToZpoolUtility, verb, args );
+        using ( Process zpoolExecProcess = new( ) { StartInfo = zpoolExecStartInfo } )
+        {
+            Logger.Debug( "Calling {0} {1} {2}", zpoolExecStartInfo.FileName, verb, args );
+            try
+            {
+                zpoolExecProcess.Start( );
+            }
+            catch ( InvalidOperationException ioex )
+            {
+                // Log this, but re-throw, because this is likely fatal, depending on call site
+                Logger.Error( ioex, "Error running zpool {0} operation. The error returned was {1}", verb, ioex.Message );
+                throw;
+            }
+
+            while ( !zpoolExecProcess.StandardOutput.EndOfStream )
+            {
+                yield return ( await zpoolExecProcess.StandardOutput.ReadLineAsync( ).ConfigureAwait( true ) )!;
+            }
+        }
+    }
+
+    private static void ValidateCommonExecArguments( string verb, string args )
+    {
+        if ( string.IsNullOrWhiteSpace( verb ) )
+        {
+            throw new ArgumentNullException( nameof( verb ), "verb cannot be null" );
+        }
+
+        if ( string.IsNullOrWhiteSpace( args ) )
+        {
+            throw new ArgumentNullException( nameof( args ), "Arguments are required for zfs/zpool exec operations" );
         }
     }
 
