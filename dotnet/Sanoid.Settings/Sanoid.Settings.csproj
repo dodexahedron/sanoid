@@ -5,6 +5,20 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<Configurations>Debug;Release;Debug-Windows</Configurations>
+		<GenerateDocumentationFile>True</GenerateDocumentationFile>
+		<DefineConstants>$(DefineConstants);JETBRAINS_ANNOTATIONS</DefineConstants>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+	  <DebugType>embedded</DebugType>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+	  <DebugType>embedded</DebugType>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug-Windows|AnyCPU'">
+	  <DebugType>embedded</DebugType>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -18,13 +32,14 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="7.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Options" Version="7.0.1" />
 		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="7.0.0" />
-		<PackageReference Include="Microsoft.NETCore.Platforms" Version="7.0.2" />
+		<PackageReference Include="Microsoft.NETCore.Platforms" Version="7.0.3" />
 		<PackageReference Include="NLog" Version="5.2.0" />
 		<PackageReference Include="NLog.Extensions.Logging" Version="5.3.0" />
 		<PackageReference Include="NLog.Targets.Journald" Version="1.2.2" />
 		<PackageReference Include="NUnit.Extension.VSProjectLoader" Version="3.9.0" />
 		<PackageReference Include="PowerArgs" Version="4.0.2" />
 		<PackageReference Include="System.Configuration.ConfigurationManager" Version="7.0.0" />
+		<PackageReference Include="Terminal.Gui" Version="1.12.1" />
 	</ItemGroup>
 
 </Project>

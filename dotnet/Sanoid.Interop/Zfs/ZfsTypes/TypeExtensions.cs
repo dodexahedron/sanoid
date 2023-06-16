@@ -39,28 +39,6 @@ public static class TypeExtensions
         return value.ToString( ).ToLowerInvariant( ).Split( ",", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries );
     }
 
-    /// <summary>
-    ///     Gets an equivalent <see cref="DatasetKind" /> from this <see langword="string" /> value.
-    /// </summary>
-    /// <param name="value">The input string to convert to <see cref="DatasetKind" /></param>
-    /// <returns>
-    ///     A <see cref="DatasetKind" /> for the given <see langword="string" /> value, or throws a
-    ///     <see cref="NotSupportedException" /> if an unsupported value is provided
-    /// </returns>
-    /// <exception cref="NotSupportedException">
-    ///     The <paramref name="value" /> does not correspond to a supported conversion to
-    ///     <see cref="DatasetKind" />
-    /// </exception>
-    public static DatasetKind ToDatasetKind( this string value )
-    {
-        return value switch
-        {
-            "volume" => DatasetKind.Volume,
-            "filesystem" => DatasetKind.FileSystem,
-            _ => throw new NotSupportedException( $"Conversion from {value} to a DatasetKind is not supported." )
-        };
-    }
-
     public static string GetZfsPathRoot( this string value )
     {
         int endIndex = value.IndexOf( '/' );
@@ -76,5 +54,69 @@ public static class TypeExtensions
 
         string rootPath = value[ ..endIndex ];
         return rootPath;
+    }
+    public static string GetZfsPathParent( this string value )
+    {
+        int endIndex = value.IndexOf( '@' );
+        if ( endIndex == -1 )
+        {
+            endIndex = value.LastIndexOf( '/' );
+        }
+
+        if ( endIndex == -1 )
+        {
+            return value;
+        }
+
+        string rootPath = value[ ..endIndex ];
+        return rootPath;
+    }
+
+    public static string ToStringForZfsSet( this IEnumerable<ZfsProperty> properties )
+    {
+        return string.Join( ' ', properties.Select( p => p.SetString ) );
+    }
+    public static string ToStringForZfsSet( this IDictionary<string, IZfsProperty> properties )
+    {
+        return string.Join( ' ', properties.Select( kvp  => kvp.Value.SetString ) );
+    }
+
+    /// <summary>
+    /// Gets a string of all <see cref="IZfsProperty.SetString"/> values, separated by spaces, to be used in zfs set operations
+    /// </summary>
+    /// <param name="properties">An <see cref="IEnumerable{T}"/> of <see cref="IZfsProperty"/> objects to get a set string for</param>
+    /// <returns></returns>
+    public static string ToStringForZfsSet( this List<IZfsProperty> properties )
+    {
+        if ( properties is null )
+        {
+            throw new ArgumentNullException( nameof( properties ), "Null collection provided" );
+        }
+        if ( !properties.Any( ) )
+        {
+            throw new ArgumentException( "Empty collection provided", nameof( properties ) );
+        }
+        return string.Join( ' ', properties.Select( p => p.SetString ) );
+    }
+
+    public static string ToCommaSeparatedSingleLineString( this IEnumerable<string> strings )
+    {
+        return string.Join( ',', strings );
+    }
+
+    /// <summary>
+    ///     Gets an integer index for radio button groups assuming the order of true,false,inherited from this
+    ///     <see cref="ZfsProperty{T}" />
+    /// </summary>
+    /// <param name="property">The <see cref="ZfsProperty{T}" /> to convert to an integer index for radio button groups</param>
+    /// <returns>
+    ///     An <see langword="int" /> representing the index in a radio button group for this property's source<br />
+    ///     0: true<br />
+    ///     1: false<br />
+    ///     2: inherited
+    /// </returns>
+    public static int AsTrueFalseRadioIndex( this ZfsProperty<bool> property )
+    {
+        return property.Value ? 0 : 1;
     }
 }

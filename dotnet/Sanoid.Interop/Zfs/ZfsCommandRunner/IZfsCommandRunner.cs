@@ -10,6 +10,7 @@ using System.Text.Json;
 using NLog;
 using Sanoid.Interop.Zfs.ZfsTypes;
 using Sanoid.Settings.Settings;
+using Terminal.Gui.Trees;
 
 namespace Sanoid.Interop.Zfs.ZfsCommandRunner;
 
@@ -41,7 +42,7 @@ public interface IZfsCommandRunner
     /// <returns>
     ///     A boolean value indicating whether the operation succeeded (ie no exceptions were thrown).
     /// </returns>
-    public bool TakeSnapshot( Dataset ds, SnapshotPeriod snapshotPeriod, DateTimeOffset timestamp, SanoidSettings settings, out Snapshot snapshot );
+    public bool TakeSnapshot( Dataset ds, SnapshotPeriod period, DateTimeOffset timestamp, SanoidSettings sanoidSettings, TemplateSettings template, out Snapshot snapshot );
 
     /// <summary>
     ///     Destroys a zfs snapshot
@@ -52,7 +53,7 @@ public interface IZfsCommandRunner
     public Task<bool> DestroySnapshotAsync( Snapshot snapshot, SanoidSettings settings );
 
     /// <summary>
-    /// Gets the capacity property from zfs for the pool roots specified and sets it on the corresponding Dataset objects
+    ///     Gets the capacity property from zfs for the pool roots specified and sets it on the corresponding Dataset objects
     /// </summary>
     /// <param name="datasets"></param>
     /// <returns>A boolean indicating success or failure of the operation</returns>
@@ -71,6 +72,24 @@ public interface IZfsCommandRunner
     ///     A <see langword="bool" /> indicating success or failure of the operation.
     /// </returns>
     public bool SetZfsProperties( bool dryRun, string zfsPath, params ZfsProperty[] properties );
+
+    /// <summary>
+    ///     Sets the provided <see cref="IZfsProperty" /> values for <paramref name="zfsPath" />
+    /// </summary>
+    /// <param name="dryRun">
+    ///     If true, instructs the method not to actually call the ZFS utility, but instead just report what
+    ///     it <em>would</em> have done.
+    /// </param>
+    /// <param name="zfsPath">The fully-qualified path to operate on</param>
+    /// <param name="properties">
+    ///     A <see cref="List{T}" /> of <see cref="IZfsProperty" /> objects to set on
+    ///     <paramref name="zfsPath" />
+    /// </param>
+    /// <returns>
+    ///     If <paramref name="dryRun" /> is <see langword="true" />: Always returns <see langword="false" /><br />
+    ///     Otherwise, a <see langword="bool" /> indicating success or failure of the operation
+    /// </returns>
+    public bool SetZfsProperties( bool dryRun, string zfsPath, List<IZfsProperty> properties );
 
     /// <summary>
     ///     Gets all dataset configuration from zfs
@@ -100,5 +119,6 @@ public interface IZfsCommandRunner
     public Task GetDatasetsAndSnapshotsFromZfsAsync( ConcurrentDictionary<string, Dataset> datasets, ConcurrentDictionary<string, Snapshot> snapshots );
 
     public IAsyncEnumerable<string> ZpoolExecEnumerator( string verb, string args );
-    public IAsyncEnumerable<string> ZfsExecEnumerator( string verb, string args );
+    public IAsyncEnumerable<string> ZfsExecEnumeratorAsync( string verb, string args );
+    public Task<List<ITreeNode>> GetZfsObjectsForConfigConsoleTreeAsync( ConcurrentDictionary<string, SanoidZfsDataset> baseDatasets, ConcurrentDictionary<string, SanoidZfsDataset> treeDatasets );
 }

@@ -44,7 +44,44 @@
             },
             {
               "name": "message",
-              "layout": "${message:raw=true}"
+              "layout": "${message}"
+            },
+            {
+              "name": "properties",
+              "encode": false,
+              "layout": {
+                "type": "JsonLayout",
+                "includeallproperties": "true"
+              }
+            }
+          ]
+        }
+      },
+      "error-file": {
+        "type": "File",
+        "fileName": "${var_logdir}/nlog-error-${shortdate}.log",
+        "layout": {
+          "type": "JsonLayout",
+          "Attributes": [
+            {
+              "name": "timestamp",
+              "layout": "${date:format=o}"
+            },
+            {
+              "name": "level",
+              "layout": "${level}"
+            },
+            {
+              "name": "logger",
+              "layout": "${logger}"
+            },
+            {
+              "name": "message",
+              "layout": "${message}"
+            },
+            {
+              "name": "exception",
+              "layout": "${exception}"
             },
             {
               "name": "properties",
@@ -106,7 +143,25 @@
         "final": true
       },
       {
-        "ruleName": "DefaultRule",
+        "ruleName": "ErrorFile",
+        "logger": "*",
+        "minLevel": "Warn",
+        "writeTo": "error-file",
+        "filterDefaultAction": "Log",
+        "final": false,
+        "enabled": true
+      },
+      {
+        "ruleName": "LogFile",
+        "logger": "*",
+        "minLevel": "Info",
+        "writeTo": "all-file",
+        "filterDefaultAction": "Log",
+        "final": false,
+        "enabled": false
+      },
+      {
+        "ruleName": "Console",
         "logger": "*",
         "minLevel": "Debug",
         "writeTo": "own-console",

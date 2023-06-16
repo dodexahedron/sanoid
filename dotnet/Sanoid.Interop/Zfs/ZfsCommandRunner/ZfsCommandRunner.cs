@@ -9,6 +9,7 @@ using System.Diagnostics;
 using NLog;
 using Sanoid.Interop.Zfs.ZfsTypes;
 using Sanoid.Settings.Settings;
+using Terminal.Gui.Trees;
 
 namespace Sanoid.Interop.Zfs.ZfsCommandRunner;
 
@@ -67,10 +68,10 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
     private new static readonly Logger Logger = LogManager.GetCurrentClassLogger( );
 
     /// <inheritdoc />
-    public override bool TakeSnapshot( Dataset ds, SnapshotPeriod period, DateTimeOffset timestamp, SanoidSettings settings, out Snapshot snapshot )
+    public override bool TakeSnapshot( Dataset ds, SnapshotPeriod period, DateTimeOffset timestamp, SanoidSettings sanoidSettings, TemplateSettings template, out Snapshot snapshot )
     {
         Logger.Debug( "{0:G} snapshot requested for dataset {1}", period.Kind, ds.Name );
-        snapshot = Snapshot.GetNewSnapshotForCommandRunner( ds, period, timestamp, settings );
+        snapshot = Snapshot.GetNewSnapshotForCommandRunner( ds, period, timestamp, template );
         try
         {
             // This exception is only thrown if kind is invalid. We're passing a known good value.
@@ -93,7 +94,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
             CreateNoWindow = true,
             RedirectStandardOutput = false
         };
-        if ( settings.DryRun )
+        if ( sanoidSettings.DryRun )
         {
             Logger.Info( "DRY RUN: Would execute `{0} {1}`", PathToZfsUtility, zfsSnapshotStartInfo.Arguments );
             return false;
@@ -222,12 +223,58 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
     {
         // Ignoring the ArgumentOutOfRangeException that this throws because it's not possible here
         // ReSharper disable once ExceptionNotDocumentedOptional
-        if ( !ZfsObjectBase.ValidateName( ZfsObjectKind.FileSystem, zfsPath ) )
+        if ( !ZfsObjectBase.ValidateName( "filesystem", zfsPath ) )
         {
             throw new ArgumentException( $"Unable to update schema for {zfsPath}. PropertyName is invalid.", nameof( zfsPath ) );
         }
 
         return PrivateSetZfsProperty( dryRun, zfsPath, properties );
+    }
+
+    /// <inheritdoc />
+    public override bool SetZfsProperties( bool dryRun, string zfsPath, List<IZfsProperty> properties )
+    {
+        if ( properties.Count == 0 )
+        {
+            Logger.Warn( "Asked to set properties for {0} but no properties provided", zfsPath );
+            return false;
+        }
+
+        string propertiesSetString = properties.ToStringForZfsSet( );
+        Logger.Trace( "Attempting to set properties on {0}: {1}", zfsPath, propertiesSetString );
+        ProcessStartInfo zfsSetStartInfo = new( PathToZfsUtility, $"set {propertiesSetString} {zfsPath}" )
+        {
+            CreateNoWindow = true,
+            RedirectStandardOutput = true
+        };
+        using ( Process zfsSetProcess = new( ) { StartInfo = zfsSetStartInfo } )
+        {
+            if ( dryRun )
+            {
+                Logger.Info( "DRY RUN: Would execute `{0} {1}`", zfsSetStartInfo.FileName, zfsSetStartInfo.Arguments );
+                return false;
+            }
+
+            Logger.Debug( "Calling {0} {1}", zfsSetStartInfo.FileName, zfsSetStartInfo.Arguments );
+            try
+            {
+                zfsSetProcess.Start( );
+            }
+            catch ( InvalidOperationException ioex )
+            {
+                Logger.Error( ioex, "Error running zfs set operation. The error returned was {0}" );
+                return false;
+            }
+
+            if ( !zfsSetProcess.HasExited )
+            {
+                Logger.Trace( "Waiting for zfs set process to exit" );
+                zfsSetProcess.WaitForExit( 3000 );
+            }
+
+            Logger.Trace( "zfs set process finished" );
+            return true;
+        }
     }
 
     /// <summary>Gets properties for datasets, either recursively (default) or using supplied arguments</summary>
@@ -298,25 +345,27 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
                 }
 
                 // If datasets doesn't already contain this token, it's a new dataset. Add it.
-                if ( !datasets.ContainsKey( lineTokens[ 0 ] ) )
+                string dsName = lineTokens[ 0 ];
+                string dsPropertyName = lineTokens[ 1 ];
+                if ( !datasets.ContainsKey( dsName ) )
                 {
-                    if ( lineTokens[ 1 ] == "type" )
+                    if ( dsPropertyName == "type" )
                     {
-                        Logger.Debug( "Adding new Dataset {0} to collection", lineTokens[ 0 ] );
-                        DatasetKind newDsKind = lineTokens[ 2 ] switch
+                        Logger.Debug( "Adding new Dataset {0} to collection", dsName );
+                        string newDsType = lineTokens[ 2 ];
+                        if ( newDsType is not "filesystem" and not "volume" )
                         {
-                            "filesystem" => DatasetKind.FileSystem,
-                            "volume" => DatasetKind.Volume,
-                            _ => throw new InvalidOperationException( "Type of object from zfs get was unrecognized" )
-                        };
-                        Logger.Debug( "Dataset {0} will be a {1}", lineTokens[ 0 ], newDsKind );
+                            throw new InvalidOperationException( "Type of object from zfs get was unrecognized" );
+                        }
 
-                        Dataset dataset = new( lineTokens[ 0 ], newDsKind );
-                        if ( !datasets.TryAdd( lineTokens[ 0 ], dataset ) )
+                        Logger.Debug( "Dataset {0} will be a {1}", dsName, newDsType );
+
+                        Dataset dataset = new( dsName, newDsType );
+                        if ( !datasets.TryAdd( dsName, dataset ) )
                         {
                             // Log if we somehow try to add a duplicate, but continue processing
                             // Likely not fatal, but needs to be reported if it does happen
-                            Logger.Error( "Attempted to add a duplicate dataset ({0}) to the collection", lineTokens[ 0 ] );
+                            Logger.Error( "Attempted to add a duplicate dataset ({0}) to the collection", dsName );
                         }
                     }
                 }
@@ -325,10 +374,10 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
                     // Dataset is already in the collection
                     // This line is a property line
                     // Parse it and add it to the dataset, if it is one of the wanted keys
-                    Logger.Trace( "Checking if property {0} is wanted by sanoid", lineTokens[ 1 ] );
-                    if ( ZfsProperty.KnownDatasetProperties.Contains( lineTokens[ 1 ] ) )
+                    Logger.Trace( "Checking if property {0} is wanted by sanoid", dsPropertyName );
+                    if ( ZfsProperty.KnownDatasetProperties.Contains( dsPropertyName ) )
                     {
-                        Logger.Trace( "Property {0} is wanted by sanoid. Adding new property {0} to Dataset {1}", lineTokens[ 1 ], lineTokens[ 0 ] );
+                        Logger.Trace( "Property {0} is wanted by sanoid. Adding new property {0} to Dataset {1}", dsPropertyName, dsName );
 
                         // Parse the array starting from the second element (first was dataset name)
                         // The slice does allocate a new array, but it's trivial
@@ -342,7 +391,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
                     else
                     {
                         // Property name wasn't a key in the set of wanted keys, so we can just ignore it and move on
-                        Logger.Trace( "Property {0} is not wanted by sanoid. Ignoring", lineTokens[ 1 ] );
+                        Logger.Trace( "Property {0} is not wanted by sanoid. Ignoring", dsPropertyName );
                     }
                 }
 
@@ -386,7 +435,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
         // The run-time cost is minimal, so it's better to be safe, even if a cached configuration is likely to
         // be correct the majority of the time.
         // Comments, corrections, rude commentary, etc. are welcome (but not too rude - this is a labor of love😅).
-        await foreach ( string zfsGetLine in ZfsExecEnumerator( "get", $"{string.Join( ',', ZfsProperty.DefaultDatasetProperties.Keys )} -t filesystem -s local,default,none -Hpd 0" ) )
+        await foreach ( string zfsGetLine in ZfsExecEnumeratorAsync( "get", $"{string.Join( ',', ZfsProperty.DefaultDatasetProperties.Keys )} -t filesystem -s local,default,none -Hpd 0" ).ConfigureAwait( true ) )
         {
             string[] elements = zfsGetLine.Split( '\t', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries );
             if ( elements.Length != 4 )
@@ -408,7 +457,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
             if ( !result.ContainsKey( dsName ) )
             {
                 Logger.Debug( "Key not in result. Creating new dataset {0}", dsName );
-                result[ dsName ] = new( dsName, DatasetKind.FileSystem, null, true );
+                result[ dsName ] = new( dsName, "filesystem", null, true );
             }
 
             Logger.Debug( "Adding property {0}({1} , {2}) to {3}", propertyName, propertyValue, propertyValueSource, dsName );
@@ -423,12 +472,12 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
     public override async Task GetDatasetsAndSnapshotsFromZfsAsync( ConcurrentDictionary<string, Dataset> datasets, ConcurrentDictionary<string, Snapshot> snapshots )
     {
         string[] poolRootNames = datasets.Keys.ToArray( );
-        string datasetPropertiesString = string.Join( ',', ZfsProperty.KnownDatasetProperties );
+        string datasetPropertiesString = ZfsProperty.KnownDatasetProperties.ToCommaSeparatedSingleLineString( );
         Logger.Debug( "Getting remaining dataset configuration from ZFS" );
         Task[] zfsGetDatasetTasks =
             ( from poolName
                   in poolRootNames
-              select Task.Run( async ( ) => await GetDatasets( poolName ).ConfigureAwait( true ) ) ).ToArray( );
+              select Task.Run( ( ) => GetDatasets( poolName ) ) ).ToArray( );
 
         Logger.Debug( "Waiting for all zfs get processes to finish." );
         await Task.WhenAll( zfsGetDatasetTasks ).ConfigureAwait( true );
@@ -437,14 +486,14 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
         Task[] zfsGetSnapshotTasks =
             ( from poolName
                   in poolRootNames
-              select Task.Run( async ( ) => await GetSnapshots( poolName ).ConfigureAwait( true ) ) ).ToArray( );
+              select Task.Run( ( ) => GetSnapshots( poolName )) ).ToArray( );
         await Task.WhenAll( zfsGetSnapshotTasks ).ConfigureAwait( true );
 
         // Local function to get datasets starting from the specified path
         async Task GetDatasets( string poolRootName )
         {
             Logger.Debug( "Getting and parsing filesystem and volume descendents of {0}", poolRootName );
-            await foreach ( string zfsGetLine in ZfsExecEnumerator( "get", $"type,{datasetPropertiesString} -H -p -r -t filesystem,volume {poolRootName}" ) )
+            await foreach ( string zfsGetLine in ZfsExecEnumeratorAsync( "get", $"type,{datasetPropertiesString} -H -p -r -t filesystem,volume {poolRootName}" ).ConfigureAwait( true ) )
             {
                 Logger.Debug( "Attempting to parse line {0} from zfs", zfsGetLine );
                 string[] zfsListTokens = zfsGetLine.Split( '\t', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries );
@@ -462,7 +511,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
                 if ( !datasets.ContainsKey( dsName ) )
                 {
                     Logger.Debug( "Dataset {0} not in collection. Attempting to add using Name: {0}, Kind: {1}", dsName, propertyValue );
-                    if ( datasets.TryAdd( dsName, new( dsName, propertyValue.ToDatasetKind( ), datasets[ poolRootName ] ) ) )
+                    if ( datasets.TryAdd( dsName, new( dsName, propertyValue, datasets[ poolRootName ] ) ) )
                     {
                         Logger.Debug( "Added Dataset {0} to collection", dsName );
                         continue;
@@ -492,7 +541,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
         {
             Logger.Debug( "Getting and parsing snapshot descendents of {0}", poolRootName );
             // This one can use a list operation, because we don't care about inheritance source for snapshots - just the values
-            await foreach ( string zfsGetLine in ZfsExecEnumerator( "list", $"-t snapshot -H -p -r -o name,{string.Join( ',', ZfsProperty.KnownSnapshotProperties )} {poolRootName}" ) )
+            await foreach ( string zfsGetLine in ZfsExecEnumeratorAsync( "list", $"-t snapshot -H -p -r -o name,{string.Join( ',', ZfsProperty.KnownSnapshotProperties )} {poolRootName}" ).ConfigureAwait( true ) )
             {
                 string[] zfsListTokens = zfsGetLine.Split( '\t', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries );
                 int propertyCount = ZfsProperty.KnownSnapshotProperties.Count + 1;
@@ -536,8 +585,10 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
     /// <returns>
     ///     An <see cref="IEnumerable{T}" /> of <see langword="string" />s, iterating over the output of the zfs operation
     /// </returns>
-    public override async IAsyncEnumerable<string> ZfsExecEnumerator( string verb, string args )
+    /// <exception cref="ArgumentNullException"><paramref name="verb" /> is <see langword="null" />.</exception>
+    public override async IAsyncEnumerable<string> ZfsExecEnumeratorAsync( string verb, string args )
     {
+        ArgumentException.ThrowIfNullOrEmpty( nameof( verb ), "Verb cannot be null or empty" );
         ValidateCommonExecArguments( verb, args );
 
         if ( verb is not "get" and not "list" )
@@ -567,7 +618,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
 
             while ( !zfsGetProcess.StandardOutput.EndOfStream )
             {
-                yield return ( await zfsGetProcess.StandardOutput.ReadLineAsync( ).ConfigureAwait( true ) )!;
+                yield return await zfsGetProcess.StandardOutput.ReadLineAsync( ).ConfigureAwait( true ) ?? throw new IOException( "Invalid attempt to read when no data present" );
             }
         }
     }
@@ -631,7 +682,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
         }
     }
 
-    /// <inheritdoc cref="SetZfsProperties" />
+    /// <inheritdoc cref="SetZfsProperties(bool,string,Sanoid.Interop.Zfs.ZfsTypes.ZfsProperty[])" />
     /// <remarks>
     ///     Does not perform name validation
     /// </remarks>
@@ -643,7 +694,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
             return false;
         }
 
-        string propertiesToSet = string.Join( ' ', properties.Select( p => p.SetString ) );
+        string propertiesToSet = properties.ToStringForZfsSet();
         Logger.Trace( "Attempting to set properties on {0}: {1}", zfsPath, propertiesToSet );
         ProcessStartInfo zfsSetStartInfo = new( PathToZfsUtility, $"set {propertiesToSet} {zfsPath}" )
         {
@@ -678,5 +729,75 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
             Logger.Trace( "zfs set process finished" );
             return true;
         }
+    }
+
+    public override async Task<List<ITreeNode>> GetZfsObjectsForConfigConsoleTreeAsync( ConcurrentDictionary<string, SanoidZfsDataset> baseDatasets, ConcurrentDictionary<string, SanoidZfsDataset> treeDatasets )
+    {
+        List<ITreeNode> treeRootNodes = new( );
+        Dictionary<string, TreeNode> allTreeNodes = new( );
+        await foreach ( string zfsLine in ZfsExecEnumeratorAsync( "get", $"type,{string.Join( ',', ZfsProperty.KnownDatasetProperties )} -Hpt filesystem -d 0" ).ConfigureAwait( true ) )
+        {
+            string[] lineTokens = zfsLine.Split( '\t', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries );
+            string propertyValue = lineTokens[ 2 ];
+            string dsName = lineTokens[ 0 ];
+            baseDatasets.AddOrUpdate( dsName, k =>
+            {
+                SanoidZfsDataset newRootDsBaseCopy = new( k, propertyValue, true );
+                SanoidZfsDataset newRootDsTreeCopy = newRootDsBaseCopy with { };
+                ZfsObjectConfigurationTreeNode node = new( dsName, newRootDsBaseCopy, newRootDsTreeCopy );
+                Logger.Debug( "Adding new pool root object {0} to collections", newRootDsBaseCopy.Name );
+                treeRootNodes.Add( node );
+                allTreeNodes[ dsName ] = node;
+                treeDatasets.TryAdd( k, newRootDsTreeCopy );
+                return newRootDsBaseCopy;
+            }, ( _, ds ) =>
+            {
+                string propertyName = lineTokens[ 1 ];
+                string propertySource = lineTokens[ 3 ];
+                ds.UpdateProperty( propertyName, propertyValue, propertySource );
+                treeDatasets[ dsName ].UpdateProperty( propertyName, propertyValue, propertySource );
+                Logger.Debug( "Updating property {0} for {1} to {2}", propertyName, dsName, propertyValue );
+                return ds;
+            } );
+        }
+
+        await foreach ( string zfsLine in ZfsExecEnumeratorAsync( "get", $"type,{string.Join( ',', ZfsProperty.KnownDatasetProperties )} -Hprt filesystem,volume {string.Join( ' ', baseDatasets.Keys )}" ).ConfigureAwait( true ) )
+        {
+            string[] lineTokens = zfsLine.Split( '\t', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries );
+
+            string dsName = lineTokens[ 0 ];
+            if ( !baseDatasets.ContainsKey( dsName ) )
+            {
+                int lastSlashIndex = dsName.LastIndexOf( '/' );
+                string parentName = dsName[ ..lastSlashIndex ];
+                SanoidZfsDataset parentDsBaseCopy = baseDatasets[ parentName ];
+                SanoidZfsDataset parentDsTreeCopy = treeDatasets[ parentName ];
+                SanoidZfsDataset newDsBaseCopy = new( dsName, lineTokens[ 2 ], false );
+                SanoidZfsDataset newDsTreeCopy = newDsBaseCopy with { };
+                ZfsObjectConfigurationTreeNode node = new(dsName, newDsBaseCopy, newDsTreeCopy, parentDsBaseCopy, parentDsTreeCopy );
+                allTreeNodes[ dsName ] = node;
+                allTreeNodes[ parentName ].Children.Add( node );
+                Logger.Debug( "Adding new {0} {1} to {2}", newDsBaseCopy.Kind, newDsBaseCopy.Name, parentDsBaseCopy.Name );
+                baseDatasets.TryAdd( dsName, newDsBaseCopy );
+                treeDatasets.TryAdd( dsName, newDsTreeCopy );
+            }
+            else
+            {
+                SanoidZfsDataset ds = baseDatasets[ dsName ];
+                if ( ds.IsPoolRoot )
+                {
+                    continue;
+                }
+
+                string propertyName = lineTokens[ 1 ];
+                string propertyValue = lineTokens[ 2 ];
+                string propertySource = lineTokens[ 3 ];
+                Logger.Debug( "Adding property {0} ({1}) - ({2}) to {3}", propertyName, propertyValue, propertySource, ds.Name );
+                ds.UpdateProperty( propertyName, propertyValue, propertySource );
+                treeDatasets[ ds.Name ].UpdateProperty( propertyName, propertyValue, propertySource );
+            }
+        }
+
+        return treeRootNodes;
     }
 }

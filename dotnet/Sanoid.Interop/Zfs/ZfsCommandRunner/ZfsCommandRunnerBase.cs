@@ -8,6 +8,7 @@ using System.Collections.Concurrent;
 using NLog;
 using Sanoid.Interop.Zfs.ZfsTypes;
 using Sanoid.Settings.Settings;
+using Terminal.Gui.Trees;
 
 namespace Sanoid.Interop.Zfs.ZfsCommandRunner;
 
@@ -16,7 +17,7 @@ public abstract class ZfsCommandRunnerBase : IZfsCommandRunner
     protected static readonly Logger Logger = LogManager.GetCurrentClassLogger( );
 
     /// <inheritdoc />
-    public abstract bool TakeSnapshot( Dataset ds, SnapshotPeriod period, DateTimeOffset timestamp, SanoidSettings settings, out Snapshot snapshot );
+    public abstract bool TakeSnapshot( Dataset ds, SnapshotPeriod period, DateTimeOffset timestamp, SanoidSettings sanoidSettings, TemplateSettings template, out Snapshot snapshot );
 
     /// <inheritdoc />
     public abstract Task<bool> DestroySnapshotAsync( Snapshot snapshot, SanoidSettings settings );
@@ -28,6 +29,9 @@ public abstract class ZfsCommandRunnerBase : IZfsCommandRunner
     public abstract bool SetZfsProperties( bool dryRun, string zfsPath, params ZfsProperty[] properties );
 
     /// <inheritdoc />
+    public abstract bool SetZfsProperties( bool dryRun, string zfsPath, List<IZfsProperty> properties );
+
+    /// <inheritdoc />
     public abstract Dictionary<string, Dataset> GetZfsDatasetConfiguration( string args = " -r" );
 
     /// <inheritdoc />
@@ -37,5 +41,9 @@ public abstract class ZfsCommandRunnerBase : IZfsCommandRunner
     public abstract Task GetDatasetsAndSnapshotsFromZfsAsync( ConcurrentDictionary<string, Dataset> datasets, ConcurrentDictionary<string, Snapshot> snapshots );
 
     public abstract IAsyncEnumerable<string> ZpoolExecEnumerator( string verb, string args );
-    public abstract IAsyncEnumerable<string> ZfsExecEnumerator( string verb, string args );
+
+    /// <inheritdoc />
+    public abstract IAsyncEnumerable<string> ZfsExecEnumeratorAsync( string verb, string args );
+
+    public abstract Task<List<ITreeNode>> GetZfsObjectsForConfigConsoleTreeAsync( ConcurrentDictionary<string, SanoidZfsDataset> baseDatasets, ConcurrentDictionary<string, SanoidZfsDataset> treeDatasets );
 }

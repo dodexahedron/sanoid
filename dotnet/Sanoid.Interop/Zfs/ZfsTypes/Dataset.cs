@@ -23,7 +23,7 @@ public class Dataset : ZfsObjectBase
     ///     Creates a new <see cref="Dataset" /> with the specified name and kind, optionally performing name validation
     /// </summary>
     /// <param name="name">The name of the new <see cref="Dataset" /></param>
-    /// <param name="kind">The <see cref="DatasetKind" /> of Dataset to create</param>
+    /// <param name="kind">The type of Dataset to create</param>
     /// <param name="poolRoot">
     ///     The root dataset for this dataset. Null for roots.
     /// </param>
@@ -36,8 +36,8 @@ public class Dataset : ZfsObjectBase
     ///     not (<see langword="false" /> - default)
     /// </param>
     /// <param name="validatorRegex">The <see cref="Regex" /> to user for name validation</param>
-    public Dataset( string name, DatasetKind kind, Dataset? poolRoot = null, bool isKnownPoolRoot = false, bool validateName = false, Regex? validatorRegex = null )
-        : base( name, (ZfsObjectKind)kind, poolRoot, isKnownPoolRoot, validateName, validatorRegex )
+    public Dataset( string name, string kind, Dataset? poolRoot = null, bool isKnownPoolRoot = false, bool validateName = false, Regex? validatorRegex = null )
+        : base( name, kind, poolRoot, isKnownPoolRoot, validateName, validatorRegex )
     {
     }
 
@@ -49,7 +49,7 @@ public class Dataset : ZfsObjectBase
     {
         get
         {
-            string valueString = Properties.TryGetValue( ZfsProperty.EnabledPropertyName, out ZfsProperty? prop ) ? prop.Value : "false";
+            string valueString = Properties.TryGetValue( ZfsPropertyNames.EnabledPropertyName, out ZfsProperty? prop ) ? prop.Value : "false";
             return bool.TryParse( valueString, out bool result ) && result;
         }
     }
@@ -58,22 +58,22 @@ public class Dataset : ZfsObjectBase
     public List<Snapshot> HourlySnapshots { get; } = new( );
 
     [JsonIgnore]
-    public DateTimeOffset LastDailySnapshotTimestamp => Properties.TryGetValue( ZfsProperty.DatasetLastDailySnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
+    public DateTimeOffset LastDailySnapshotTimestamp => Properties.TryGetValue( ZfsPropertyNames.DatasetLastDailySnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
 
     [JsonIgnore]
-    public DateTimeOffset LastFrequentSnapshotTimestamp => Properties.TryGetValue( ZfsProperty.DatasetLastFrequentSnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
+    public DateTimeOffset LastFrequentSnapshotTimestamp => Properties.TryGetValue( ZfsPropertyNames.DatasetLastFrequentSnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
 
     [JsonIgnore]
-    public DateTimeOffset LastHourlySnapshotTimestamp => Properties.TryGetValue( ZfsProperty.DatasetLastHourlySnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
+    public DateTimeOffset LastHourlySnapshotTimestamp => Properties.TryGetValue( ZfsPropertyNames.DatasetLastHourlySnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
 
     [JsonIgnore]
-    public DateTimeOffset LastMonthlySnapshotTimestamp => Properties.TryGetValue( ZfsProperty.DatasetLastMonthlySnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
+    public DateTimeOffset LastMonthlySnapshotTimestamp => Properties.TryGetValue( ZfsPropertyNames.DatasetLastMonthlySnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
 
     [JsonIgnore]
-    public DateTimeOffset LastWeeklySnapshotTimestamp => Properties.TryGetValue( ZfsProperty.DatasetLastWeeklySnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
+    public DateTimeOffset LastWeeklySnapshotTimestamp => Properties.TryGetValue( ZfsPropertyNames.DatasetLastWeeklySnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
 
     [JsonIgnore]
-    public DateTimeOffset LastYearlySnapshotTimestamp => Properties.TryGetValue( ZfsProperty.DatasetLastYearlySnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
+    public DateTimeOffset LastYearlySnapshotTimestamp => Properties.TryGetValue( ZfsPropertyNames.DatasetLastYearlySnapshotTimestampPropertyName, out ZfsProperty? prop ) && DateTimeOffset.TryParse( prop.Value, out DateTimeOffset timestamp ) ? timestamp : DateTimeOffset.UnixEpoch;
 
     public List<Snapshot> MonthlySnapshots { get; } = new( );
 
@@ -82,7 +82,7 @@ public class Dataset : ZfsObjectBase
     {
         get
         {
-            string valueString = Properties.TryGetValue( ZfsProperty.RecursionPropertyName, out ZfsProperty? prop ) ? prop.Value : SnapshotRecursionMode.Sanoid;
+            string valueString = Properties.TryGetValue( ZfsPropertyNames.RecursionPropertyName, out ZfsProperty? prop ) ? prop.Value : SnapshotRecursionMode.Sanoid;
             return valueString;
         }
     }
@@ -92,13 +92,13 @@ public class Dataset : ZfsObjectBase
     {
         get
         {
-            string valueString = Properties.TryGetValue( ZfsProperty.TakeSnapshotsPropertyName, out ZfsProperty? prop ) ? prop.Value : "false";
+            string valueString = Properties.TryGetValue( ZfsPropertyNames.TakeSnapshotsPropertyName, out ZfsProperty? prop ) ? prop.Value : "false";
             return bool.TryParse( valueString, out bool result ) && result;
         }
     }
 
     [JsonIgnore]
-    public string Template => Properties.TryGetValue( ZfsProperty.TemplatePropertyName, out ZfsProperty? prop ) ? prop.Value : "default";
+    public string Template => Properties.TryGetValue( ZfsPropertyNames.TemplatePropertyName, out ZfsProperty? prop ) ? prop.Value : "default";
 
     public List<Snapshot> WeeklySnapshots { get; } = new( );
     public List<Snapshot> YearlySnapshots { get; } = new( );
@@ -235,12 +235,11 @@ public class Dataset : ZfsObjectBase
     }
 
     /// <summary>
-    ///     Gets whether a frequent snapshot is needed, according to the provided <see cref="TemplateSettings" /> and
+    ///     Gets whether a frequent snapshot is needed, according to the provided <see cref="SnapshotTimingSettings" /> and
     ///     <paramref name="timestamp" />
     /// </summary>
     /// <param name="template">
-    ///     The <see cref="TemplateSettings" /> object to check status against. Must have the
-    ///     <see cref="TemplateSettings.SnapshotTiming" /> property defined.
+    ///     The <see cref="SnapshotTimingSettings" /> object to check status against.
     /// </param>
     /// <param name="timestamp">The <see cref="DateTimeOffset" /> value to check against the last known snapshot of this type</param>
     /// <returns>
@@ -257,7 +256,7 @@ public class Dataset : ZfsObjectBase
     ///         </item>
     ///     </list>
     /// </returns>
-    public bool IsFrequentSnapshotNeeded( TemplateSettings template, DateTimeOffset timestamp )
+    public bool IsFrequentSnapshotNeeded( SnapshotTimingSettings template, DateTimeOffset timestamp )
     {
         //Exit early if retention settings say no frequent
         if ( !RetentionSettings.IsFrequentWanted )
@@ -268,11 +267,11 @@ public class Dataset : ZfsObjectBase
         // Yes, this can all be done in-line, but this is easier to debug, is more explicit, and the compiler is
         // going to optimize it all away anyway.
         Logger.Trace( "Checking if frequent snapshot is needed for dataset {0} at timestamp {1:O}", Name, timestamp );
-        int currentFrequentPeriodOfHour = template.SnapshotTiming.GetPeriodOfHour( timestamp );
-        int lastFrequentSnapshotPeriodOfHour = template.SnapshotTiming.GetPeriodOfHour( LastFrequentSnapshotTimestamp );
+        int currentFrequentPeriodOfHour = template.GetPeriodOfHour( timestamp );
+        int lastFrequentSnapshotPeriodOfHour = template.GetPeriodOfHour( LastFrequentSnapshotTimestamp );
         double minutesSinceLastFrequentSnapshot = ( timestamp - LastFrequentSnapshotTimestamp ).TotalMinutes;
         // Check if more than FrequentPeriod ago or if the period of the hour is different.
-        bool frequentSnapshotNeeded = minutesSinceLastFrequentSnapshot >= template.SnapshotTiming.FrequentPeriod || lastFrequentSnapshotPeriodOfHour != currentFrequentPeriodOfHour;
+        bool frequentSnapshotNeeded = minutesSinceLastFrequentSnapshot >= template.FrequentPeriod || lastFrequentSnapshotPeriodOfHour != currentFrequentPeriodOfHour;
         Logger.Debug( "Frequent snapshot is {2}needed for dataset {0} at timestamp {1:O}", Name, timestamp, frequentSnapshotNeeded ? "" : "not " );
         return frequentSnapshotNeeded;
     }
@@ -355,12 +354,11 @@ public class Dataset : ZfsObjectBase
     }
 
     /// <summary>
-    ///     Gets whether a weekly snapshot is needed, according to the provided <see cref="TemplateSettings" /> and
+    ///     Gets whether a weekly snapshot is needed, according to the provided <see cref="SnapshotTimingSettings" /> and
     ///     <paramref name="timestamp" />
     /// </summary>
     /// <param name="template">
-    ///     The <see cref="TemplateSettings" /> object to check status against. Must have the
-    ///     <see cref="TemplateSettings.SnapshotTiming" /> property defined.
+    ///     The <see cref="SnapshotTimingSettings" /> object to check status against.
     /// </param>
     /// <param name="timestamp">The <see cref="DateTimeOffset" /> value to check against the last known snapshot of this type</param>
     /// <returns>
@@ -381,7 +379,7 @@ public class Dataset : ZfsObjectBase
     ///     Uses culture-aware definitions of week numbers, using the executing user's culture, and treating the day of the
     ///     week specified in settings for weekly snapshots as the "first" day of the week, for week numbering purposes
     /// </remarks>
-    public bool IsWeeklySnapshotNeeded( TemplateSettings template, DateTimeOffset timestamp )
+    public bool IsWeeklySnapshotNeeded( SnapshotTimingSettings template, DateTimeOffset timestamp )
     {
         //Exit early if retention settings say no weeklies
         if ( !RetentionSettings.IsWeeklyWanted )
@@ -395,16 +393,15 @@ public class Dataset : ZfsObjectBase
         TimeSpan timeSinceLastWeeklySnapshot = timestamp - LastWeeklySnapshotTimestamp;
         bool atLeastOneWeekSinceLastWeeklySnapshot = timeSinceLastWeeklySnapshot.TotalDays >= 7d;
         // Check if more than a week ago or if the week number is different by local rules, using the chosen day as the first day of the week
-        int lastWeeklySnapshotWeekNumber = CultureInfo.CurrentCulture.Calendar.GetWeekOfYear( LastWeeklySnapshotTimestamp.LocalDateTime, CalendarWeekRule.FirstDay, template.SnapshotTiming.WeeklyDay );
-        int currentWeekNumber = CultureInfo.CurrentCulture.Calendar.GetWeekOfYear( timestamp.LocalDateTime, CalendarWeekRule.FirstDay, template.SnapshotTiming.WeeklyDay );
+        int lastWeeklySnapshotWeekNumber = CultureInfo.CurrentCulture.Calendar.GetWeekOfYear( LastWeeklySnapshotTimestamp.LocalDateTime, CalendarWeekRule.FirstDay, template.WeeklyDay );
+        int currentWeekNumber = CultureInfo.CurrentCulture.Calendar.GetWeekOfYear( timestamp.LocalDateTime, CalendarWeekRule.FirstDay, template.WeeklyDay );
         bool weeklySnapshotNeeded = atLeastOneWeekSinceLastWeeklySnapshot || currentWeekNumber != lastWeeklySnapshotWeekNumber;
         Logger.Debug( "Weekly snapshot is {2}needed for dataset {0} at timestamp {1:O}", Name, timestamp, weeklySnapshotNeeded ? "" : "not " );
         return weeklySnapshotNeeded;
     }
 
     /// <summary>
-    ///     Gets whether a monthly snapshot is needed, according to the provided <see cref="TemplateSettings" /> and
-    ///     <paramref name="timestamp" />
+    ///     Gets whether a monthly snapshot is needed
     /// </summary>
     /// <param name="timestamp">The <see cref="DateTimeOffset" /> value to check against the last known snapshot of this type</param>
     /// <returns>

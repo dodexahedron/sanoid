@@ -52,7 +52,7 @@ internal static class ZfsTasks
 
         foreach ( ( string _, Dataset ds ) in datasets )
         {
-            if ( !settings.Templates.TryGetValue( ds.Template, out TemplateSettings? template ) )
+            if ( !settings.Templates.TryGetValue( ds.Template, out TemplateSettings template ) )
             {
                 string errorMessage = $"Template {ds.Template} specified for {ds.Name} not found in configuration - skipping";
                 Logger.Error( errorMessage );
@@ -76,7 +76,7 @@ internal static class ZfsTasks
 
             Logger.Debug( "Checking for and taking needed snapshots for dataset {0}", ds.Name );
 
-            if ( ds.IsFrequentSnapshotNeeded( template, timestamp ) )
+            if ( ds.IsFrequentSnapshotNeeded( template.SnapshotTiming, timestamp ) )
             {
                 Logger.Debug( "Frequent snapshot needed for dataset {0}", ds.Name );
                 TakeSnapshotKind( ds, SnapshotPeriod.Frequent, propsToSet );
@@ -94,7 +94,7 @@ internal static class ZfsTasks
                 TakeSnapshotKind( ds, SnapshotPeriod.Daily, propsToSet );
             }
 
-            if ( ds.IsWeeklySnapshotNeeded( template, timestamp ) )
+            if ( ds.IsWeeklySnapshotNeeded( template.SnapshotTiming, timestamp ) )
             {
                 Logger.Debug( "Weekly snapshot needed for dataset {0}", ds.Name );
                 TakeSnapshotKind( ds, SnapshotPeriod.Weekly, propsToSet );
@@ -147,12 +147,12 @@ internal static class ZfsTasks
             ZfsProperty? prop = null;
             string datasetSnapshotTimestampPropertyName = period.Kind switch
             {
-                SnapshotPeriodKind.Frequent => ZfsProperty.DatasetLastFrequentSnapshotTimestampPropertyName,
-                SnapshotPeriodKind.Hourly => ZfsProperty.DatasetLastHourlySnapshotTimestampPropertyName,
-                SnapshotPeriodKind.Daily => ZfsProperty.DatasetLastDailySnapshotTimestampPropertyName,
-                SnapshotPeriodKind.Weekly => ZfsProperty.DatasetLastWeeklySnapshotTimestampPropertyName,
-                SnapshotPeriodKind.Monthly => ZfsProperty.DatasetLastMonthlySnapshotTimestampPropertyName,
-                SnapshotPeriodKind.Yearly => ZfsProperty.DatasetLastYearlySnapshotTimestampPropertyName,
+                SnapshotPeriodKind.Frequent => ZfsPropertyNames.DatasetLastFrequentSnapshotTimestampPropertyName,
+                SnapshotPeriodKind.Hourly => ZfsPropertyNames.DatasetLastHourlySnapshotTimestampPropertyName,
+                SnapshotPeriodKind.Daily => ZfsPropertyNames.DatasetLastDailySnapshotTimestampPropertyName,
+                SnapshotPeriodKind.Weekly => ZfsPropertyNames.DatasetLastWeeklySnapshotTimestampPropertyName,
+                SnapshotPeriodKind.Monthly => ZfsPropertyNames.DatasetLastMonthlySnapshotTimestampPropertyName,
+                SnapshotPeriodKind.Yearly => ZfsPropertyNames.DatasetLastYearlySnapshotTimestampPropertyName,
                 _ => throw new ArgumentOutOfRangeException( nameof( period ) )
             };
             bool snapshotTaken = TakeSnapshot( commandRunner, settings, ds, period, timestamp, out Snapshot? snapshot );
@@ -201,7 +201,8 @@ internal static class ZfsTasks
         }
 
         Logger.Info( "Begin pruning snapshots for all configured datasets" );
-        Parallel.ForEach( datasets.Values, new( ) { MaxDegreeOfParallelism = 4, TaskScheduler = null }, async ds => await PruneSnapshotsForDatasetAsync( ds ).ConfigureAwait( true ) );
+        ParallelOptions options = new() { MaxDegreeOfParallelism = 4, TaskScheduler = null };
+        await Parallel.ForEachAsync( datasets.Values, options, async ( ds, _ ) => await PruneSnapshotsForDatasetAsync( ds ).ConfigureAwait( true ) ).ConfigureAwait( true );
 
         // snapshotName is a constant string. Thus, this NullReferenceException is not possible.
         // ReSharper disable once ExceptionNotDocumentedOptional
@@ -291,7 +292,7 @@ internal static class ZfsTasks
             return false;
         }
 
-        if ( ds.Recursion == SnapshotRecursionMode.Zfs && ds[ ZfsProperty.RecursionPropertyName ]?.Source != "local" )
+        if ( ds.Recursion == SnapshotRecursionMode.Zfs && ds[ ZfsPropertyNames.RecursionPropertyName ]?.Source != "local" )
         {
             Logger.Trace( "Ancestor of dataset {0} is configured for zfs native recursion and recursion not set locally. Skipping", ds.Name );
             return false;
@@ -359,7 +360,7 @@ internal static class ZfsTasks
 
         Logger.Trace( "Dataset {0} will have a snapshot taken with these settings: {1}", ds.Name, JsonSerializer.Serialize( new { ds, template } ) );
 
-        if ( commandRunner.TakeSnapshot( ds, snapshotPeriod, timestamp, settings, out snapshot ) )
+        if ( commandRunner.TakeSnapshot( ds, snapshotPeriod, timestamp, settings, settings.Templates[ ds.Template ], out snapshot ) )
         {
             ds.AddSnapshot( snapshot );
             Logger.Info( "Snapshot {0} successfully taken", snapshot.Name );
@@ -493,7 +494,7 @@ internal static class ZfsTasks
     }
 
     [SuppressMessage( "ReSharper", "AsyncConverter.AsyncAwaitMayBeElidedHighlighting", Justification = "Without using this all the way down, the application won't actually work properly" )]
-    public static async Task GetDatasetsAndSnapshotsFromZfsAsync( IZfsCommandRunner zfsCommandRunner, SanoidSettings settings, ConcurrentDictionary<string, Dataset> datasets, ConcurrentDictionary<string, Snapshot> snapshots )
+    public static async Task GetDatasetsAndSnapshotsFromZfsAsync( IZfsCommandRunner zfsCommandRunner, ConcurrentDictionary<string, Dataset> datasets, ConcurrentDictionary<string, Snapshot> snapshots )
     {
         await zfsCommandRunner.GetDatasetsAndSnapshotsFromZfsAsync( datasets, snapshots ).ConfigureAwait( true );
     }

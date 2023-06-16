@@ -4,6 +4,7 @@
 // from http://www.gnu.org/licenses/gpl-3.0.html on 2014-11-17.  A copy should also be available in this
 // project's Git repository at https://github.com/jimsalterjrs/sanoid/blob/master/LICENSE.
 
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 
 namespace Sanoid.Settings.Settings;
@@ -11,46 +12,48 @@ namespace Sanoid.Settings.Settings;
 /// <summary>
 ///     Settings class for use with the .net <see cref="IConfiguration" /> binder
 /// </summary>
-public sealed class SanoidSettings
+public record SanoidSettings
 {
     /// <summary>
     ///     Gets or sets sanoid.net's directory for temporary files
     /// </summary>
-    public required string CacheDirectory { get; set; }
+    [JsonPropertyOrder( 6 )]
+    public string CacheDirectory { get; set; }
 
     /// <summary>
     ///     Gets or sets whether a dry run will be performed, which means no changes will be made to ZFS
     /// </summary>
-    public required bool DryRun { get; set; }
-
-    /// <summary>
-    ///     Gets or sets the global formatting settings sanoid.net will use
-    /// </summary>
-    public required FormattingSettings Formatting { get; set; }
+    [JsonPropertyOrder( 1 )]
+    public bool DryRun { get; set; }
 
     /// <summary>
     ///     Gets or sets the global PruneSnapshots setting
     /// </summary>
-    public required bool PruneSnapshots { get; set; }
+    [JsonPropertyOrder( 3 )]
+    public bool PruneSnapshots { get; set; }
 
     /// <summary>
     ///     Gets or sets the global TakeSnapshots setting
     /// </summary>
-    public required bool TakeSnapshots { get; set; }
+    [JsonPropertyOrder( 2 )]
+    public bool TakeSnapshots { get; set; }
 
     /// <summary>
     ///     Gets or sets the templates sub-section
     /// </summary>
     // ReSharper disable once CollectionNeverUpdated.Global
-    public required Dictionary<string, TemplateSettings> Templates { get; set; } = new( );
+    [JsonPropertyOrder( 7 )]
+    public Dictionary<string, TemplateSettings> Templates { get; set; } = new( );
 
     /// <summary>
     ///     Gets or sets the path to the zfs utility
     /// </summary>
-    public required string ZfsPath { get; set; }
+    [JsonPropertyOrder( 4 )]
+    public string ZfsPath { get; set; }
 
     /// <summary>
     ///     Gets or sets the path to the zpool utility
     /// </summary>
-    public required string ZpoolPath { get; set; }
+    [JsonPropertyOrder( 5 )]
+    public string ZpoolPath { get; set; }
 }
