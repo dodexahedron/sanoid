@@ -471,9 +471,15 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
     /// <inheritdoc />
     public override async Task GetDatasetsAndSnapshotsFromZfsAsync( ConcurrentDictionary<string, Dataset> datasets, ConcurrentDictionary<string, Snapshot> snapshots )
     {
-        string[] poolRootNames = datasets.Keys.ToArray( );
+        List<string> poolRootNames = new( );
+        Logger.Debug( "Getting pool names for parallel property retrieval" );
+        await foreach ( string zpoolListLine in ZpoolExecEnumerator( "list", "-Ho name" ).ConfigureAwait( true ) )
+        {
+            poolRootNames.Add( zpoolListLine.Trim( ) );
+        }
+
         string datasetPropertiesString = ZfsProperty.KnownDatasetProperties.ToCommaSeparatedSingleLineString( );
-        Logger.Debug( "Getting remaining dataset configuration from ZFS" );
+        Logger.Debug( "Getting all dataset configurations from ZFS" );
         Task[] zfsGetDatasetTasks =
             ( from poolName
                   in poolRootNames
@@ -510,6 +516,19 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
                 Logger.Debug( "Checking for existence of dataset {0} in collection", dsName );
                 if ( !datasets.ContainsKey( dsName ) )
                 {
+                    if ( dsName.GetZfsPathParent( ) == dsName )
+                    {
+                        Logger.Debug( "Dataset {0} is a pool root", dsName );
+                        if ( datasets.TryAdd( dsName, new( dsName, propertyValue, null, true ) ) )
+                        {
+                            Logger.Debug( "Added Dataset {0} to collection", dsName );
+                            continue;
+                        }
+
+                        Logger.Error( "Failed adding root dataset {0} to dictionary. Taking and pruning of snapshots for this Dataset and descendents may not be performed", dsName );
+                        continue;
+                    }
+
                     Logger.Debug( "Dataset {0} not in collection. Attempting to add using Name: {0}, Kind: {1}", dsName, propertyValue );
                     if ( datasets.TryAdd( dsName, new( dsName, propertyValue, datasets[ poolRootName ] ) ) )
                     {
@@ -517,15 +536,7 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
                         continue;
                     }
 
-                    Logger.Error( "Failed adding dataset {0} to dictionary. Taking and pruning of snapshots for this Dataset may not be performed", dsName );
-                    continue;
-                }
-
-                // We can ignore and continue if this is the type property
-                // This case happens for the pool roots, since they've already been created and the first
-                // encountered property will always be type
-                if ( propertyName == "type" )
-                {
+                    Logger.Error( "Failed adding dataset {0} to dictionary. Taking and pruning of snapshots for this Dataset and descendents may not be performed", dsName );
                     continue;
                 }
 
@@ -739,6 +750,92 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
         return treeRootNodes;
     }
 
+    /// <inheritdoc />
+    public override async Task<ConcurrentDictionary<string, ConcurrentDictionary<string, bool>>> GetPoolRootsAndPropertyValiditiesAsync( )
+    {
+        string zfsGetArgs = $"{string.Join( ',', ZfsProperty.KnownDatasetProperties )} -Hpt filesystem -d 0";
+        ConcurrentDictionary<string, ConcurrentDictionary<string, bool>> rootsAndTheirProperties = new( );
+        await foreach ( string zfsGetLine in ZfsExecEnumeratorAsync( "get", zfsGetArgs ).ConfigureAwait( true ) )
+        {
+            string[] lineTokens = zfsGetLine.Split( '\t', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries );
+            string poolName = lineTokens[ 0 ];
+            string propName = lineTokens[ 1 ];
+            string propValue = lineTokens[ 2 ];
+            string propSource = lineTokens[ 3 ];
+            rootsAndTheirProperties.AddOrUpdate( poolName, AddNewDatasetWithProperty, AddPropertyToExistingDs );
+
+            ConcurrentDictionary<string, bool> AddNewDatasetWithProperty( string key )
+            {
+                ConcurrentDictionary<string, bool> newDs = new( )
+                {
+                    [ propName ] = CheckIfPropertyIsValid( propName, propValue, propSource )
+                };
+                return newDs;
+            }
+
+            ConcurrentDictionary<string, bool> AddPropertyToExistingDs( string key, ConcurrentDictionary<string, bool> properties )
+            {
+                properties[ propName ] = CheckIfPropertyIsValid( propName, propValue, propSource );
+                return properties;
+            }
+        }
+
+        return rootsAndTheirProperties;
+    }
+
+    /// <inheritdoc />
+    public override bool SetDefaultValuesForMissingZfsPropertiesOnPoolAsync( bool dryRun, string dsName, string[] properties )
+    {
+        if ( properties.Length == 0 )
+        {
+            Logger.Warn( "Asked to set properties for {0} but no properties provided", dsName );
+            return false;
+        }
+
+        List<string> setStrings = new( );
+
+        foreach ( string propName in properties )
+        {
+            setStrings.Add( ZfsProperty.DefaultDatasetProperties[ propName ].SetString );
+        }
+
+        string propertiesSetString = string.Join( ' ', setStrings );
+        Logger.Trace( "Attempting to set properties on {0}: {1}", dsName, propertiesSetString );
+        ProcessStartInfo zfsSetStartInfo = new( PathToZfsUtility, $"set {propertiesSetString} {dsName}" )
+        {
+            CreateNoWindow = true,
+            RedirectStandardOutput = true
+        };
+        if ( dryRun )
+        {
+            Logger.Info( "DRY RUN: Would execute `{0} {1}`", zfsSetStartInfo.FileName, zfsSetStartInfo.Arguments );
+            return false;
+        }
+
+        using ( Process zfsSetProcess = new( ) { StartInfo = zfsSetStartInfo } )
+        {
+            Logger.Debug( "Calling {0} {1}", zfsSetStartInfo.FileName, zfsSetStartInfo.Arguments );
+            try
+            {
+                zfsSetProcess.Start( );
+            }
+            catch ( InvalidOperationException ioex )
+            {
+                Logger.Error( ioex, "Error running zfs set operation. The error returned was {0}" );
+                return false;
+            }
+
+            if ( !zfsSetProcess.HasExited )
+            {
+                Logger.Trace( "Waiting for zfs set process to exit" );
+                zfsSetProcess.WaitForExit( 3000 );
+            }
+
+            Logger.Trace( "zfs set process finished" );
+            return true;
+        }
+    }
+
     private static void ValidateCommonExecArguments( string verb, string args )
     {
         if ( string.IsNullOrWhiteSpace( verb ) )
@@ -771,14 +868,14 @@ public class ZfsCommandRunner : ZfsCommandRunnerBase, IZfsCommandRunner
             CreateNoWindow = true,
             RedirectStandardOutput = true
         };
+        if ( dryRun )
+        {
+            Logger.Info( "DRY RUN: Would execute `{0} {1}`", zfsSetStartInfo.FileName, zfsSetStartInfo.Arguments );
+            return false;
+        }
+
         using ( Process zfsSetProcess = new( ) { StartInfo = zfsSetStartInfo } )
         {
-            if ( dryRun )
-            {
-                Logger.Info( "DRY RUN: Would execute `{0} {1}`", zfsSetStartInfo.FileName, zfsSetStartInfo.Arguments );
-                return false;
-            }
-
             Logger.Debug( "Calling {0} {1}", zfsSetStartInfo.FileName, zfsSetStartInfo.Arguments );
             try
             {

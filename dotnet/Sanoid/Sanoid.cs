@@ -108,6 +108,8 @@ internal class Program
                                                .AddJsonFile( "/usr/local/share/Sanoid.net/Sanoid.json", true, false )
                                                .AddJsonFile( "/etc/sanoid/Sanoid.local.json", true, false )
                                                .AddJsonFile( Path.Combine( Path.GetFullPath( Environment.GetEnvironmentVariable( "HOME" ) ?? "~/" ), ".config/Sanoid.net/Sanoid.user.json" ), true, false )
+                                           #endif
+                                           #if ALLOW_ADJACENT_CONFIG_FILE
                                                .AddJsonFile( "Sanoid.local.json", true, false )
                                            #endif
                                                .Build( );
@@ -165,7 +167,7 @@ internal class Program
             {
                 // Requested schema update
                 // Run the update and return EOK or ENOATTR based on success of the updates
-                return ZfsTasks.UpdateZfsDatasetSchema( Settings.DryRun, schemaCheckResult.MissingPoolPropertyCollections, zfsCommandRunner )
+                return ZfsTasks.UpdateZfsDatasetSchema( Settings.DryRun, schemaCheckResult.PoolRootsWithPropertyValidities, zfsCommandRunner )
                     ? (int)Errno.EOK
                     : (int)Errno.ENOATTR;
             }
@@ -177,7 +179,7 @@ internal class Program
             return (int)Errno.EOK;
         }
 
-        ConcurrentDictionary<string, Dataset> datasets = schemaCheckResult.Datasets;
+        ConcurrentDictionary<string, Dataset> datasets = new( );
         ConcurrentDictionary<string, Snapshot> snapshots = new( );
 
         Logger.Debug( "Getting remaining datasets and all snapshots from ZFS" );

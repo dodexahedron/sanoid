@@ -195,6 +195,46 @@ internal class DummyZfsCommandRunner : ZfsCommandRunnerBase
         return treeRootNodes;
     }
 
+    /// <inheritdoc />
+    public override async Task<ConcurrentDictionary<string, ConcurrentDictionary<string, bool>>> GetPoolRootsAndPropertyValiditiesAsync( )
+    {
+        //string fileName = "poolprops-bad-schemacheck.txt";
+        string fileName = "poolroots-withproperties.txt";
+        ConcurrentDictionary<string, ConcurrentDictionary<string, bool>> rootsAndTheirProperties = new( );
+        await foreach ( string zfsGetLine in ZfsExecEnumeratorAsync( "get", fileName ).ConfigureAwait( true ) )
+        {
+            string[] lineTokens = zfsGetLine.Split( '\t', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries );
+            string poolName = lineTokens[ 0 ];
+            string propName = lineTokens[ 1 ];
+            string propValue = lineTokens[ 2 ];
+            string propSource = lineTokens[ 3 ];
+            rootsAndTheirProperties.AddOrUpdate( poolName, AddNewDatasetWithProperty, AddPropertyToExistingDs );
+
+            ConcurrentDictionary<string, bool> AddNewDatasetWithProperty( string key )
+            {
+                ConcurrentDictionary<string,bool> newDs = new( )
+                {
+                    [ propName ] = CheckIfPropertyIsValid( propName, propValue, propSource )
+                };
+                return newDs;
+            }
+
+            ConcurrentDictionary<string, bool> AddPropertyToExistingDs( string key, ConcurrentDictionary<string, bool> properties )
+            {
+                properties[ propName ] = CheckIfPropertyIsValid( propName, propValue, propSource );
+                return properties;
+            }
+        }
+
+        return rootsAndTheirProperties;
+    }
+
+    /// <inheritdoc />
+    public override bool SetDefaultValuesForMissingZfsPropertiesOnPoolAsync( bool dryRun, string poolName, string[] propertyArray )
+    {
+        return !dryRun;
+    }
+
     private static async Task GetMockZfsDatasetsFromTextFileAsync( ConcurrentDictionary<string, Dataset> datasets, string filePath )
     {
         using StreamReader rdr = File.OpenText( filePath );
