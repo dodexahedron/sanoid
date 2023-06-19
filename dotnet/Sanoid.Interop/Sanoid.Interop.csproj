@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
-    <Configurations>Debug;Release;Debug-Windows</Configurations>
+    <Configurations>Debug;Release;Debug-Windows;Release-R2R</Configurations>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
@@ -20,6 +20,13 @@
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
     <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-R2R|AnyCPU'">
+    <Optimize>True</Optimize>
+    <GenerateDocumentationFile>False</GenerateDocumentationFile>
+    <PublishReadyToRun>True</PublishReadyToRun>
+    <PublishSingleFile>True</PublishSingleFile>
   </PropertyGroup>
 
 
